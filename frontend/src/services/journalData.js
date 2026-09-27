@@ -60,37 +60,43 @@ export const EXPERIMENTS_DATA = [];
 export const PROFILE_DATA = {
   name: "Shlok Bam",
   handle: "shlokbam",
-  title: "Software Engineer & System Builder",
-  bio: "I like building systems that turn complex problems into simple, reliable software. Focused on AI agents, LLM orchestration, scalable backend architectures, and DevOps CI/CD automation.",
+  title: "Information Technology Student & System Builder",
+  bio: "Third-Year IT Student at VIT Pune (9.01 CGPA). Building Agentic AI pipelines, multi-stage orchestration systems, scalable full-stack applications, and DevOps containerized infrastructure.",
   status: "Currently building AI systems & developer tools",
-  location: "Bangalore, India / Remote",
+  portfolio_url: "https://portfolio-edaa.onrender.com/",
   github: "https://github.com/shlokbam",
   linkedin: "https://linkedin.com/in/shlokbam",
-  email: "contact@shlokbam.dev",
+  email: "shlokbam19103@gmail.com",
   current_focus: [
-    "Multi-Agent Orchestration with LangGraph & FastAPI",
-    "Automated DevOps CI/CD pipelines & Docker container optimization",
-    "High-throughput MySQL & PostgreSQL performance tuning",
-    "Modern minimal frontend engineering with React & Vite"
+    "Agentic AI Systems & RAG Orchestration at PharmaACE Innovations",
+    "Founding Chairperson of ITSA (Information Technology Student's Association)",
+    "Multi-Agent AI Pipelines with LangChain, LangGraph & Mistral AI",
+    "Containerized DevOps Pipelines with Docker, Jenkins & AWS"
   ],
   tech_stack: {
-    languages: ["Python", "JavaScript / TypeScript", "SQL", "HTML/CSS"],
-    frameworks: ["FastAPI", "React", "Vite", "Tailwind CSS", "LangGraph", "SQLAlchemy"],
-    databases: ["MySQL", "PostgreSQL", "Redis", "SQLite", "Qdrant"],
-    tools: ["Docker", "Kubernetes", "Jenkins", "Terraform", "AWS EC2", "Alembic", "Git"]
+    languages: ["Python", "C++", "C", "Java", "JavaScript", "SQL"],
+    frameworks: ["FastAPI", "Flask", "React", "Node.js", "LangChain", "LangGraph", "Gemini API"],
+    databases: ["PostgreSQL", "MySQL", "MongoDB", "Firebase", "Vector DBs"],
+    tools: ["Docker", "Jenkins", "Kubernetes", "Terraform", "AWS", "GCP", "Git"]
   },
   experience: [
     {
-      role: "Software Engineering & AI Systems",
-      company: "Independent / Engineering Labs",
-      period: "2024 — Present",
-      description: "Architecting autonomous agentic frameworks, multi-tenant FastAPI backends, and full-stack technical platforms."
+      role: "Agentic AI Intern",
+      company: "PharmaACE Innovations",
+      period: "2025 — Present",
+      description: "Engineering Agentic AI systems and multi-stage orchestration pipelines. Designing RAG architectures, prompt engineering components, and robust backend data processing workflows."
     },
     {
-      role: "DevOps & Software Systems Engineer",
-      company: "Technology Projects",
-      period: "2023 — 2024",
-      description: "Designed high-throughput data ingestion pipelines, automated Jenkins + Docker + Terraform CI/CD container builds, and relational schema migrations."
+      role: "Founding Chairperson",
+      company: "ITSA (Information Technology Student's Association), VIT Pune",
+      period: "2024 — Present",
+      description: "Leading committee initiatives, technical workshops, hackathon teams, and student mentorship in software development and cloud technologies."
+    },
+    {
+      role: "Co-Inventor (3 Patents)",
+      company: "CIPC South Africa & IPO India",
+      period: "2024 — 2025",
+      description: "Co-invented 3 published/granted patents covering AI Wildlife Protection using YOLO, Automated Produce Quality Classification, and Next-Gen TKPH Heavy Machinery Tire Management."
     }
   ]
 };
