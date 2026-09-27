@@ -1004,7 +1004,7 @@ Keep it simple until operational metrics prove you need distributed scaling.
   }
 ];
 
-export const MOCK_EXPERIMENTS = [
+export const EXPERIMENTS_DATA = [
   {
     id: 1,
     title: "Quantization vs. Latency: Llama 3.3 70B Benchmark",
@@ -1065,7 +1065,7 @@ export const MOCK_EXPERIMENTS = [
   }
 ];
 
-export const MOCK_PROFILE = {
+export const PROFILE_DATA = {
   name: "Shlok Bam",
   handle: "shlokbam",
   title: "Software Engineer & System Builder",

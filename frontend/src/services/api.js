@@ -1,5 +1,5 @@
-// API service layer with backend API integration + mock data fallback
-import { MOCK_POSTS, MOCK_EXPERIMENTS, MOCK_PROFILE } from './mockData';
+// API service layer with backend API integration + publication content fallback
+import { JOURNAL_POSTS, EXPERIMENTS_DATA, PROFILE_DATA } from './journalData';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
@@ -10,16 +10,16 @@ async function fetchWithFallback(url, fallbackData) {
     const data = await res.json();
     return data;
   } catch (err) {
-    // Graceful fallback to mock data when backend is starting or offline
+    // Graceful fallback to primary article store when backend is starting or offline
     return fallbackData;
   }
 }
 
 export const postsApi = {
   getAll: async (params = {}) => {
-    let posts = await fetchWithFallback('/posts', MOCK_POSTS);
+    let posts = await fetchWithFallback('/posts', JOURNAL_POSTS);
     
-    // Apply frontend filtering if using fallback data
+    // Apply filtering if using static dataset
     if (params.type && params.type !== 'ALL') {
       posts = posts.filter(p => p.content_type?.toUpperCase() === params.type.toUpperCase());
     }
@@ -38,20 +38,20 @@ export const postsApi = {
   },
   
   getBySlug: async (slug) => {
-    const post = await fetchWithFallback(`/posts/${slug}`, MOCK_POSTS.find(p => p.slug === slug));
-    return post || MOCK_POSTS.find(p => p.slug === slug);
+    const post = await fetchWithFallback(`/posts/${slug}`, JOURNAL_POSTS.find(p => p.slug === slug));
+    return post || JOURNAL_POSTS.find(p => p.slug === slug);
   }
 };
 
 export const experimentsApi = {
   getAll: async () => {
-    return await fetchWithFallback('/experiments', MOCK_EXPERIMENTS);
+    return await fetchWithFallback('/experiments', EXPERIMENTS_DATA);
   }
 };
 
 export const profileApi = {
   get: async () => {
-    return await fetchWithFallback('/profile', MOCK_PROFILE);
+    return await fetchWithFallback('/profile', PROFILE_DATA);
   }
 };
 
@@ -66,13 +66,13 @@ export const searchApi = {
     if (!query || query.trim() === '') return { posts: [], experiments: [] };
     const q = query.toLowerCase().trim();
     
-    const posts = MOCK_POSTS.filter(p => 
+    const posts = JOURNAL_POSTS.filter(p => 
       p.title.toLowerCase().includes(q) || 
       p.excerpt.toLowerCase().includes(q) || 
       p.tags.some(t => t.toLowerCase().includes(q))
     );
     
-    const experiments = MOCK_EXPERIMENTS.filter(e => 
+    const experiments = EXPERIMENTS_DATA.filter(e => 
       e.title.toLowerCase().includes(q) || 
       e.summary.toLowerCase().includes(q) || 
       e.tags.some(t => t.toLowerCase().includes(q))
