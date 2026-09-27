@@ -1517,7 +1517,7 @@ Three specific design choices here:
 1. **Structured output via prompt engineering.** I don't use Groq's JSON mode — I tell the model exactly what JSON structure to return in plain English. The fallback parser strips code blocks in case the model wraps the JSON in backticks anyway:
 
 ```python
-match = re.search(r'\{.*\}', raw, re.DOTALL)
+match = re.search(r'\\{.*\\}', raw, re.DOTALL)
 if match:
     return json.loads(match.group())
 ```
