@@ -1,15 +1,17 @@
 import React from 'react';
-import { Terminal, CheckCircle2, AlertCircle, ExternalLink, Server, Cpu, Database, GitBranch, Layers, Activity } from 'lucide-react';
+import { Terminal, CheckCircle2, AlertCircle, ExternalLink, Server, Cpu, Database, GitBranch, Layers, Activity, Brain, Mic, Eye, Play, Sparkles } from 'lucide-react';
 import { Github } from '../ui/Icons';
 
 export function ArticleImageEmbed({ src, alt }) {
   // Render custom screenshot / diagram cards based on image src identifier
   switch (src) {
+    // ----------------------------------------------------
+    // ARTICLE 1: DevOps Pipeline Postmortem
+    // ----------------------------------------------------
     case 'hero-banner':
       return (
         <div className="my-8 rounded-2xl overflow-hidden bg-[#0D1117] border border-[#1D222B] shadow-2xl">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-0">
-            {/* Left Terminal Pane */}
             <div className="lg:col-span-6 p-5 bg-[#08090B] border-r border-[#1D222B] font-mono text-xs space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-[#1D222B]">
                 <div className="flex items-center gap-2">
@@ -52,7 +54,6 @@ export function ArticleImageEmbed({ src, alt }) {
               </div>
             </div>
 
-            {/* Right Card Header Pane */}
             <div className="lg:col-span-6 p-8 flex flex-col justify-between bg-gradient-to-br from-[#0D1117] to-[#11141A]">
               <div className="space-y-4">
                 <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-[#6C8CFF]/10 text-[#6C8CFF] font-mono text-xs border border-[#6C8CFF]/20">
@@ -82,7 +83,7 @@ export function ArticleImageEmbed({ src, alt }) {
                 </div>
                 <div className="text-right">
                   <span className="text-[#F5F7FA] font-bold">Shlok Bam</span><br />
-                  <span>@shlokbam.hashnode.dev</span>
+                  <span>shlokbam.dev</span>
                 </div>
               </div>
             </div>
@@ -101,7 +102,6 @@ export function ArticleImageEmbed({ src, alt }) {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-2 font-mono text-xs">
-            {/* Step 1 */}
             <div className="p-4 rounded-xl bg-[#11141A] border border-[#1D222B] space-y-2 relative group hover:border-[#6C8CFF]/50 transition-colors">
               <div className="text-[10px] text-[#6C8CFF] font-semibold">STEP 01</div>
               <div className="text-[#F5F7FA] font-bold flex items-center gap-1.5">
@@ -113,7 +113,6 @@ export function ArticleImageEmbed({ src, alt }) {
               </div>
             </div>
 
-            {/* Step 2 */}
             <div className="p-4 rounded-xl bg-[#11141A] border border-[#1D222B] space-y-2 relative group hover:border-[#6C8CFF]/50 transition-colors">
               <div className="text-[10px] text-[#6C8CFF] font-semibold">STEP 02</div>
               <div className="text-[#F5F7FA] font-bold flex items-center gap-1.5">
@@ -125,7 +124,6 @@ export function ArticleImageEmbed({ src, alt }) {
               </div>
             </div>
 
-            {/* Step 3 */}
             <div className="p-4 rounded-xl bg-[#11141A] border border-[#1D222B] space-y-2 relative group hover:border-[#6C8CFF]/50 transition-colors">
               <div className="text-[10px] text-[#6C8CFF] font-semibold">STEP 03</div>
               <div className="text-[#F5F7FA] font-bold flex items-center gap-1.5">
@@ -137,7 +135,6 @@ export function ArticleImageEmbed({ src, alt }) {
               </div>
             </div>
 
-            {/* Step 4 */}
             <div className="p-4 rounded-xl bg-[#11141A] border border-[#1D222B] space-y-2 relative group hover:border-[#6C8CFF]/50 transition-colors">
               <div className="text-[10px] text-[#6C8CFF] font-semibold">STEP 04</div>
               <div className="text-[#F5F7FA] font-bold flex items-center gap-1.5">
@@ -149,7 +146,6 @@ export function ArticleImageEmbed({ src, alt }) {
               </div>
             </div>
 
-            {/* Step 5 */}
             <div className="p-4 rounded-xl bg-[#11141A] border border-emerald-500/30 bg-emerald-500/5 space-y-2 relative group hover:border-emerald-500/60 transition-colors">
               <div className="text-[10px] text-emerald-400 font-semibold">STEP 05</div>
               <div className="text-[#F5F7FA] font-bold flex items-center gap-1.5">
@@ -187,7 +183,6 @@ export function ArticleImageEmbed({ src, alt }) {
               <span className="col-span-3 font-bold text-[#9CA3AF]">PORTS & NAMES</span>
             </div>
 
-            {/* Container Row 1 */}
             <div className="grid grid-cols-12 gap-2 text-[11px] py-1 border-b border-[#1D222B]/40 items-center">
               <span className="col-span-2 text-amber-300">0b3f03244c40</span>
               <span className="col-span-3 text-[#F5F7FA]">flask-todo-app-flask</span>
@@ -196,7 +191,6 @@ export function ArticleImageEmbed({ src, alt }) {
               <span className="col-span-3 text-[#6C8CFF]">0.0.0.0:5000-&gt;5000/tcp (flask-app)</span>
             </div>
 
-            {/* Container Row 2 */}
             <div className="grid grid-cols-12 gap-2 text-[11px] py-1 items-center">
               <span className="col-span-2 text-amber-300">8d72a49c1ce7</span>
               <span className="col-span-3 text-[#F5F7FA]">mysql:8.0</span>
@@ -285,7 +279,6 @@ export function ArticleImageEmbed({ src, alt }) {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 font-mono text-xs">
-            {/* Stage 1 */}
             <div className="p-4 rounded-xl bg-[#11141A] border border-emerald-500/30 bg-emerald-500/5 space-y-2">
               <div className="flex items-center justify-between text-[#9CA3AF]">
                 <span className="font-semibold text-[#F5F7FA]">1. Clone Code</span>
@@ -295,7 +288,6 @@ export function ArticleImageEmbed({ src, alt }) {
               <div className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] w-fit font-bold">✓ PASSED</div>
             </div>
 
-            {/* Stage 2 */}
             <div className="p-4 rounded-xl bg-[#11141A] border border-emerald-500/30 bg-emerald-500/5 space-y-2">
               <div className="flex items-center justify-between text-[#9CA3AF]">
                 <span className="font-semibold text-[#F5F7FA]">2. Build Image</span>
@@ -305,7 +297,6 @@ export function ArticleImageEmbed({ src, alt }) {
               <div className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] w-fit font-bold">✓ PASSED</div>
             </div>
 
-            {/* Stage 3 */}
             <div className="p-4 rounded-xl bg-[#11141A] border border-emerald-500/30 bg-emerald-500/5 space-y-2">
               <div className="flex items-center justify-between text-[#9CA3AF]">
                 <span className="font-semibold text-[#F5F7FA]">3. Deploy Compose</span>
@@ -315,7 +306,6 @@ export function ArticleImageEmbed({ src, alt }) {
               <div className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] w-fit font-bold">✓ PASSED</div>
             </div>
 
-            {/* Stage 4 */}
             <div className="p-4 rounded-xl bg-[#11141A] border border-emerald-500/30 bg-emerald-500/5 space-y-2">
               <div className="flex items-center justify-between text-[#9CA3AF]">
                 <span className="font-semibold text-[#F5F7FA]">4. Status Check</span>
@@ -335,7 +325,6 @@ export function ArticleImageEmbed({ src, alt }) {
     case 'live-app':
       return (
         <div className="my-8 rounded-2xl bg-[#0D1117] border border-[#1D222B] overflow-hidden shadow-2xl font-sans">
-          {/* Simulated Browser Bar */}
           <div className="px-4 py-3 bg-[#161B26] border-b border-[#1D222B] flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="w-3 h-3 rounded-full bg-rose-500 inline-block"></span>
@@ -348,7 +337,6 @@ export function ArticleImageEmbed({ src, alt }) {
             <span className="text-xs font-mono text-[#6B7280]">Live Application</span>
           </div>
 
-          {/* Live Task Manager UI Preview */}
           <div className="p-8 bg-[#F8FAFC] text-slate-900 space-y-6">
             <div className="text-center space-y-2">
               <h2 className="text-2xl font-extrabold text-slate-900">Task Manager</h2>
@@ -357,7 +345,6 @@ export function ArticleImageEmbed({ src, alt }) {
               </p>
             </div>
 
-            {/* Stat Counters */}
             <div className="grid grid-cols-3 gap-4 max-w-md mx-auto text-center font-mono">
               <div className="p-3 rounded-xl bg-white border border-slate-200 shadow-sm">
                 <div className="text-2xl font-black text-indigo-600">3</div>
@@ -373,7 +360,6 @@ export function ArticleImageEmbed({ src, alt }) {
               </div>
             </div>
 
-            {/* Input Form */}
             <div className="flex gap-2 max-w-md mx-auto">
               <input
                 type="text"
@@ -386,7 +372,6 @@ export function ArticleImageEmbed({ src, alt }) {
               </button>
             </div>
 
-            {/* Task List */}
             <div className="space-y-2 max-w-md mx-auto font-mono text-xs">
               <div className="p-3 rounded-lg bg-white border border-slate-200 shadow-sm flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -469,6 +454,144 @@ export function ArticleImageEmbed({ src, alt }) {
                   Set up automated actions that start your build based on specific events, like code changes or scheduled times.
                 </p>
               </div>
+            </div>
+          </div>
+        </div>
+      );
+
+    // ----------------------------------------------------
+    // ARTICLE 2: AI Data Analyst App (DataLens)
+    // ----------------------------------------------------
+    case 'datalens-hero':
+      return (
+        <div className="my-8 rounded-2xl overflow-hidden bg-[#0D1117] border border-[#1D222B] shadow-2xl p-8 bg-gradient-to-br from-[#0B1516] via-[#0D1117] to-[#102022]">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="space-y-4 max-w-xl">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-teal-500/10 text-teal-400 font-mono text-xs border border-teal-500/20">
+                <Sparkles className="w-3.5 h-3.5" /> AI Data Science Project
+              </div>
+              <h3 className="text-3xl font-extrabold text-[#F5F7FA] tracking-tight">
+                DataLens — <span className="text-teal-400">AI Data Analyst</span> Copilot
+              </h3>
+              <p className="text-sm text-[#9CA3AF] leading-relaxed">
+                CSV uploads + Groq (Llama 3.3 70B) AI insights + auto-generated Matplotlib charts + persistent chat history + ReportLab PDF export.
+              </p>
+              <div className="flex flex-wrap gap-2 pt-2">
+                {['Python', 'Flask', 'Groq Llama 3.3', 'Pandas', 'Matplotlib', 'ReportLab', 'SQLite'].map((tag) => (
+                  <span key={tag} className="px-2.5 py-1 rounded-md bg-[#161B26] border border-[#1D222B] text-[11px] font-mono text-teal-300">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="p-6 rounded-2xl bg-[#08090B] border border-teal-500/30 text-teal-400 font-mono text-center space-y-2 w-full md:w-64 shadow-lg">
+              <div className="text-3xl font-black">2,823</div>
+              <div className="text-[10px] text-[#6B7280] uppercase tracking-wider">CSV Rows Analyzed</div>
+              <div className="text-xs text-emerald-400 pt-2 border-t border-[#1D222B]">Groq 70B Token Optimization: ~800 tokens/query</div>
+            </div>
+          </div>
+        </div>
+      );
+
+    case 'datalens-flow':
+      return (
+        <div className="my-8 p-6 rounded-2xl bg-[#0D1117] border border-[#1D222B] space-y-4 font-mono text-xs">
+          <div className="flex items-center justify-between border-b border-[#1D222B] pb-3">
+            <span className="text-[#F5F7FA] font-bold flex items-center gap-2">
+              <Brain className="w-4 h-4 text-teal-400" /> DataLens Analytical Pipeline Flow
+            </span>
+            <span className="text-teal-400">7-Step Execution</span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
+            <div className="p-4 rounded-xl bg-[#11141A] border border-[#1D222B] space-y-1">
+              <span className="text-[10px] text-teal-400 font-bold">1. CSV UPLOAD</span>
+              <p className="text-[#F5F7FA] font-semibold">User Uploads CSV</p>
+              <p className="text-[11px] text-[#6B7280]">Stored locally & validated</p>
+            </div>
+            <div className="p-4 rounded-xl bg-[#11141A] border border-[#1D222B] space-y-1">
+              <span className="text-[10px] text-teal-400 font-bold">2. PANDAS SUMMARY</span>
+              <p className="text-[#F5F7FA] font-semibold">Pre-process Compact Text</p>
+              <p className="text-[11px] text-[#6B7280]">Extract stats, columns & samples</p>
+            </div>
+            <div className="p-4 rounded-xl bg-[#11141A] border border-[#1D222B] space-y-1">
+              <span className="text-[10px] text-teal-400 font-bold">3. GROQ LLAMA 70B</span>
+              <p className="text-[#F5F7FA] font-semibold">Generates Insight Answer</p>
+              <p className="text-[11px] text-[#6B7280]">3 separate deterministic API calls</p>
+            </div>
+            <div className="p-4 rounded-xl bg-[#11141A] border border-teal-500/30 bg-teal-500/5 space-y-1">
+              <span className="text-[10px] text-teal-300 font-bold">4. CHART & PDF</span>
+              <p className="text-[#F5F7FA] font-semibold">Matplotlib + ReportLab</p>
+              <p className="text-[11px] text-teal-400">Render charts & export PDF</p>
+            </div>
+          </div>
+        </div>
+      );
+
+    // ----------------------------------------------------
+    // ARTICLE 3: MockVue AI Interview Platform
+    // ----------------------------------------------------
+    case 'mockvue-hero':
+      return (
+        <div className="my-8 rounded-2xl overflow-hidden bg-[#0D1117] border border-[#1D222B] shadow-2xl p-8 bg-gradient-to-br from-[#130E20] via-[#0D1117] to-[#1B132B]">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="space-y-4 max-w-xl">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-500/10 text-purple-400 font-mono text-xs border border-purple-500/20">
+                <Mic className="w-3.5 h-3.5" /> Full-Stack AI Assessment Platform
+              </div>
+              <h3 className="text-3xl font-extrabold text-[#F5F7FA] tracking-tight">
+                MockVue — <span className="text-purple-400">AI Mock Interview</span> Platform
+              </h3>
+              <p className="text-sm text-[#9CA3AF] leading-relaxed">
+                React 19 + FastAPI + TiDB Cloud + Groq Whisper & Llama 3.3 70B + face-api.js real-time gaze & eye contact tracking.
+              </p>
+              <div className="flex flex-wrap gap-2 pt-2">
+                {['React 19', 'FastAPI', 'TiDB Cloud', 'Whisper AI', 'Llama 3.3 70B', 'face-api.js', 'Vercel'].map((tag) => (
+                  <span key={tag} className="px-2.5 py-1 rounded-md bg-[#161B26] border border-[#1D222B] text-[11px] font-mono text-purple-300">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="p-6 rounded-2xl bg-[#08090B] border border-purple-500/30 text-purple-400 font-mono text-center space-y-2 w-full md:w-64 shadow-lg">
+              <div className="text-3xl font-black">270+</div>
+              <div className="text-[10px] text-[#6B7280] uppercase tracking-wider">Curated Interview Questions</div>
+              <div className="text-xs text-purple-300 pt-2 border-t border-[#1D222B]">13 Top Companies & 5 Core Tech Roles</div>
+            </div>
+          </div>
+        </div>
+      );
+
+    case 'mockvue-architecture':
+      return (
+        <div className="my-8 p-6 rounded-2xl bg-[#0D1117] border border-[#1D222B] space-y-4 font-mono text-xs">
+          <div className="flex items-center justify-between border-b border-[#1D222B] pb-3">
+            <span className="text-[#F5F7FA] font-bold flex items-center gap-2">
+              <Eye className="w-4 h-4 text-purple-400" /> MockVue End-to-End System Architecture
+            </span>
+            <span className="text-purple-400">Browser to Cloud</span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
+            <div className="p-4 rounded-xl bg-[#11141A] border border-[#1D222B] space-y-1">
+              <span className="text-[10px] text-purple-400 font-bold">FRONTEND RECORDING</span>
+              <p className="text-[#F5F7FA] font-semibold">Camera + Mic + face-api.js</p>
+              <p className="text-[11px] text-[#6B7280]">Tracks gaze ratio & WPM live</p>
+            </div>
+            <div className="p-4 rounded-xl bg-[#11141A] border border-[#1D222B] space-y-1">
+              <span className="text-[10px] text-purple-400 font-bold">WHISPER TRANSCRIPTION</span>
+              <p className="text-[#F5F7FA] font-semibold">Groq Whisper API</p>
+              <p className="text-[11px] text-[#6B7280]">Generates exact text & pauses</p>
+            </div>
+            <div className="p-4 rounded-xl bg-[#11141A] border border-[#1D222B] space-y-1">
+              <span className="text-[10px] text-purple-400 font-bold">LLAMA 70B GRADING</span>
+              <p className="text-[#F5F7FA] font-semibold">Rubric-Based Scorecard</p>
+              <p className="text-[11px] text-[#6B7280]">Evaluates answer quality (40% max)</p>
+            </div>
+            <div className="p-4 rounded-xl bg-[#11141A] border border-purple-500/30 bg-purple-500/5 space-y-1">
+              <span className="text-[10px] text-purple-300 font-bold">TIDB CLOUD DATABASE</span>
+              <p className="text-[#F5F7FA] font-semibold">Serverless MySQL</p>
+              <p className="text-[11px] text-purple-400">Stores session score (100 pts max)</p>
             </div>
           </div>
         </div>

@@ -828,8 +828,6 @@ You learn more from things breaking than from things working.
 - Terraform AWS provider docs
 - Jenkins Pipeline syntax
 - Docker Compose reference
-
-*If you built this or hit different errors, share in the comments. Would love to know what broke for you.*
 """
 
         if not existing:
@@ -854,9 +852,7 @@ You learn more from things breaking than from things working.
                 if not tag:
                     tag = Tag(name=t_name, slug=t_name.lower().replace(" ", "-"))
                     db.add(tag)
-                devops_post.tags.append(tag)
         else:
-            # Update content to full version if already exists
             existing.content = devops_content
             existing.reading_time = "20 min read"
             existing.published_at = "2026-03-14"

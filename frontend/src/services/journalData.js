@@ -809,8 +809,6 @@ You learn more from things breaking than from things working.
 - Terraform AWS provider docs
 - Jenkins Pipeline syntax
 - Docker Compose reference
-
-*If you built this or hit different errors, share in the comments. Would love to know what broke for you.*
 `,
     content_type: "BUILD",
     category: "DevOps",
@@ -826,181 +824,1076 @@ You learn more from things breaking than from things working.
   },
   {
     id: 2,
-    title: "Building an AI Business Analytics Copilot: Multi-Agent Orchestration & SQL Synthesis",
-    slug: "building-an-ai-business-analytics-copilot",
-    excerpt: "How I designed a multi-stage agentic pipeline using LangGraph and FastAPI to transform unstructured business requirements into verified SQL queries and visual forecasts.",
+    title: "I Built an AI Data Analyst App from Scratch — Here's How I Taught a Flask App to Think",
+    slug: "i-built-an-ai-data-analyst-app-from-scratch-here-s-how-i-taught-a-flask-app-to-think",
+    excerpt: "A full walkthrough of building DataLens — CSV uploads, Groq/Llama 3.3 70B AI insights, auto-generated charts, user auth, persistent chat history, and PDF export.",
     content: `
-# Introduction
+![DataLens AI Data Analyst Banner](datalens-hero)
 
-Modern business analytics often suffers from a classic bottleneck: decision-makers need answers from database warehouses, but data teams are overwhelmed with ad-hoc SQL query requests.
+# Before We Start — Why I Built This
 
-To bridge this gap, I designed and built **ABAC (AI Business Analytics Copilot)** — an autonomous multi-agent pipeline that transforms high-level natural language questions into deterministic SQL queries, validates schema constraints, executes dry runs against a data warehouse, and synthesizes executive summary reports.
+I've been getting into AI APIs lately. And like most people who just discovered that you can call a language model from Python in three lines of code, I immediately wanted to do something actually useful with it.
+
+The idea came from a real frustration. I had a sales CSV with 2,800 rows. I wanted to know which region was performing best, what the trend looked like over time, and whether there was a correlation between deal size and product line. I opened Excel, filtered, aggregated, made a pivot table, screamed internally, and gave up.
+
+What if I could just *ask* those questions in plain English and get an actual answer?
+
+So I built DataLens — an app where you upload any CSV, ask questions in natural language, get AI-powered insights, and get automatically generated charts. Then I kept going. Added user accounts. Saved conversation history. Added PDF export.
+
+This post covers the full build — every phase, every concept, every error that made me question my choices. If you're learning Flask, SQLAlchemy, or working with AI APIs, there's something here for you.
 
 ---
 
-## Architecture Overview
+## What I Built
 
-Rather than relying on a single monolithic prompt, ABAC splits the reasoning process into specialized micro-agents running on top of **FastAPI** and **LangGraph**:
+Here's what DataLens does:
 
-1. **Schema Retriever Agent**: Maps user intent to relevant table schemas, foreign key relationships, and metadata definitions using vector similarity.
-2. **SQL Generation Agent**: Generates dialect-specific SQL (MySQL / PostgreSQL / BigQuery) with strict CTE structures and aggregations.
-3. **Validator & Execution Guard**: Runs SQL AST parsing to block destructive state mutations (\`DROP\`, \`DELETE\`, \`UPDATE\`) and verifies query safety against a read-only database replica.
-4. **Insight Synthesis Agent**: Summarizes the resulting dataset into clear natural language insights, complete with automatically generated data visualization configs.
+![DataLens Architecture Flow](datalens-flow)
+
+\`\`\`text
+User uploads CSV
+    │
+    ▼
+Flask reads the file ➔ Pandas generates a text summary
+    │
+    ▼
+Groq API (Llama 3.3 70B) reads summary ➔ generates insight
+    │
+    ▼
+Groq suggests chart type + which columns to plot
+    │
+    ▼
+Matplotlib renders the chart ➔ PNG sent directly to browser
+    │
+    ▼
+SQLAlchemy saves the Q&A to database
+    │
+    ▼
+User can switch between past chats, export PDFs
+\`\`\`
+
+Every question you ask is saved. Every analysis session is stored. You can close the tab, come back tomorrow, and pick up exactly where you left off. And when you're done, you can export the whole conversation — questions, AI answers, and charts — as a PDF.
+
+### Tech Stack
+
+| What | Tool |
+| :--- | :--- |
+| **Web Framework** | Python Flask |
+| **Database** | SQLAlchemy + SQLite |
+| **Auth** | Flask-Login |
+| **AI** | Groq API (Llama 3.3 70B) |
+| **Data Processing** | Pandas |
+| **Charting** | Matplotlib |
+| **PDF Generation** | ReportLab |
+| **Frontend** | Vanilla JS + CSS |
+
+I built this in 4 phases. Let me walk you through each one.
+
+---
+
+## Phase A — SQLAlchemy + Database Design
+
+The first decision was the data model. Three tables:
+
+- **User** — email and hashed password
+- **Chat** — each CSV upload creates a Chat (stores filename and path)
+- **Message** — each Q&A exchange is a Message inside a Chat
+
+This is a classic one-to-many relationship:
+- One User ➔ many Chats
+- One Chat ➔ many Messages
+
+Here's how that looks in SQLAlchemy:
 
 \`\`\`python
-# Multi-agent node definition snippet
-from typing import TypedDict, List
-from langgraph.graph import StateGraph, END
+class User(db.Model, UserMixin):
+    __tablename__ = 'users'
+    id            = db.Column(db.Integer, primary_key=True)
+    email         = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(256), nullable=False)
+    chats         = db.relationship('Chat', backref='user', lazy=True, cascade='all, delete-orphan')
 
-class State(TypedDict):
-    question: str
-    schema_context: List[str]
-    generated_sql: str
-    is_valid: bool
-    results: List[dict]
-    summary: str
+class Chat(db.Model):
+    __tablename__ = 'chats'
+    id           = db.Column(db.Integer, primary_key=True)
+    name         = db.Column(db.String(200), nullable=False)
+    csv_path     = db.Column(db.String(500))
+    csv_filename = db.Column(db.String(200))
+    user_id      = db.Column(db.Integer, db.ForeignKey('users.id'))
+    messages     = db.relationship('Message', backref='chat', lazy=True, cascade='all, delete-orphan')
 
-builder = StateGraph(State)
-builder.add_node("retrieve_schema", retrieve_schema_node)
-builder.add_node("generate_sql", generate_sql_node)
-builder.add_node("validate_sql", validate_sql_node)
-builder.add_node("execute_query", execute_query_node)
+class Message(db.Model):
+    __tablename__ = 'messages'
+    id          = db.Column(db.Integer, primary_key=True)
+    chat_id     = db.Column(db.Integer, db.ForeignKey('chats.id'))
+    question    = db.Column(db.Text, nullable=False)
+    answer      = db.Column(db.Text, nullable=False)
+    chart_type  = db.Column(db.String(50))
+    chart_x_col = db.Column(db.String(200))
+    chart_y_col = db.Column(db.String(200))
+\`\`\`
 
-builder.add_edge("retrieve_schema", "generate_sql")
-builder.add_edge("generate_sql", "validate_sql")
-builder.add_conditional_edges(
-    "validate_sql",
-    lambda s: "execute_query" if s["is_valid"] else "generate_sql"
-)
+A few things here that are worth understanding:
+
+- \`cascade='all, delete-orphan'\` — when you delete a User, all their Chats get deleted automatically. When you delete a Chat, all its Messages go too. Without this, you'd have orphaned rows sitting in the database forever.
+- \`backref='user'\` — this creates a reverse relationship. Once this is set, you can do \`chat.user\` to get the User who owns that chat, without writing any extra query. SQLAlchemy handles it.
+- \`UserMixin\` — Flask-Login needs certain methods on your User model (\`is_authenticated\`, \`get_id()\`, etc.). \`UserMixin\` provides all of these for free. You just inherit from it.
+
+No separate migration tool needed for this project. Just \`db.create_all()\` inside the app context on startup, and all three tables get created automatically.
+
+---
+
+## Phase B — Flask Blueprints + Auth
+
+This is where I learned what Blueprints actually are, not just theoretically.
+
+A Blueprint is Flask's way of splitting a large app into smaller, reusable pieces. Instead of dumping everything in \`app.py\`, you put auth-related routes in \`auth.py\` as a Blueprint and register it in \`app.py\`. The routes behave identically — they're just organized.
+
+\`\`\`python
+# auth.py
+from flask import Blueprint, render_template, request, redirect, url_for, flash
+from flask_login import login_user, logout_user, login_required, current_user
+
+auth_bp = Blueprint('auth', __name__)
+
+@auth_bp.route('/login', methods=['GET', 'POST'])
+def login():
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+        
+    if request.method == 'POST':
+        email    = request.form.get('email', '').strip().lower()
+        password = request.form.get('password', '')
+        
+        user = User.query.filter_by(email=email).first()
+        if not user or not user.check_password(password):
+            flash('Invalid email or password.', 'error')
+            return render_template('login.html')
+            
+        login_user(user, remember=True)
+        return redirect(url_for('index'))
+        
+    return render_template('login.html')
+\`\`\`
+
+\`\`\`python
+# app.py
+from auth import auth_bp
+app.register_blueprint(auth_bp)
+\`\`\`
+
+That's it. The route lives at \`/login\` and you reference it anywhere as \`url_for('auth.login')\`. The \`auth.\` prefix is the Blueprint name. One of those things where once you see it, it clicks immediately.
+
+### Password Hashing Error & Fix
+
+I ran into a compatibility issue here. Werkzeug 2.x defaults to \`scrypt\` for hashing. But \`scrypt\` requires OpenSSL compiled with scrypt support, and my Python 3.9 environment didn't have it:
+
+\`\`\`text
+AttributeError: module 'hashlib' has no attribute 'scrypt'
+\`\`\`
+
+Fix was simple — explicitly specify \`pbkdf2:sha256\`:
+
+\`\`\`python
+def set_password(self, password):
+    self.password_hash = generate_password_hash(password, method='pbkdf2:sha256')
+\`\`\`
+
+\`pbkdf2:sha256\` is NIST-approved, used by production apps everywhere, and works on all Python versions. Perfectly fine security-wise.
+
+### Protecting Routes
+
+One decorator and a route is fully protected:
+
+\`\`\`python
+@app.route('/upload', methods=['POST'])
+@login_required
+def upload_file():
+    ...
+\`\`\`
+
+Unauthenticated requests get redirected to the login page automatically. Just make sure you tell Flask-Login where your login page is:
+
+\`\`\`python
+login_manager.login_view = 'auth.login'
 \`\`\`
 
 ---
 
-## Key Challenges & Lessons
+## Phase C — Multi-Chat Routing
 
-### 1. Schema Drift & Ambiguity
-LLMs frequently hallucinate column names when schemas grow beyond 50+ tables. Using semantic chunking of column docstrings reduced schema hallucinations by **84%**.
+Here's where it got interesting.
 
-### 2. Deterministic SQL Execution
-Prompting alone is not enough for production accuracy. Implementing AST validation via \`sqlglot\` ensured zero malicious or syntax-broken queries reached the database level.
+The original version of the app was stateless — you uploaded a file, asked questions, everything lived in the Flask session (basically a browser cookie). Close the tab and it was gone. Not great.
+
+Phase C converts it to full persistence. Every upload creates a Chat row. Every question creates a Message row. The user's sidebar shows all their past analyses.
+
+\`\`\`python
+@app.route('/upload', methods=['POST'])
+@login_required
+def upload_file():
+    file = request.files['file']
+    filename = secure_filename(file.filename)
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(filepath)
+
+    # Phase C: create a Chat record in the database
+    chat = Chat(
+        name=filename.replace('.csv', '').replace('_', ' ').title(),
+        csv_path=filepath,
+        csv_filename=filename,
+        user_id=current_user.id
+    )
+    db.session.add(chat)
+    db.session.commit()
+
+    session['filepath'] = filepath
+    session['chat_id'] = chat.id
+    return jsonify({"status": "success"})
+\`\`\`
+
+And in the \`/ask\` route, after getting the AI response:
+
+\`\`\`python
+msg = Message(
+    chat_id     = session.get('chat_id'),
+    question    = user_question,
+    answer      = insight,
+    chart_type  = chart_type,
+    chart_x_col = chart_column_suggestion.get('x'),
+    chart_y_col = chart_column_suggestion.get('y'),
+)
+db.session.add(msg)
+db.session.commit()
+\`\`\`
+
+We save the chart metadata too — not the image bytes, because charts can be regenerated from the original CSV later. This matters a lot for the PDF export in Phase D.
+
+The chat-switching API has three routes:
+- \`GET /chats\` — list all chats for current user
+- \`GET /chats/<id>\` — get all messages for one chat
+- \`POST /chats/<id>/activate\` — restore a chat into the session
+- \`DELETE /chats/<id>\` — delete chat + cascade messages
+
+### Legacy API Warning Fix
+
+One thing I discovered: \`db.session.get(User, user_id)\` is the correct way to look up by primary key in SQLAlchemy 2.x. The old \`User.query.get(id)\` syntax still works but fires a deprecation warning on every request:
+
+\`\`\`text
+LegacyAPIWarning: The Query.get() method is considered legacy
+\`\`\`
+
+Changed it in the Flask-Login user loader and the warnings went away.
 
 ---
 
-## Results & Benchmarks
+## Phase D — PDF Export with ReportLab
 
-On an internal benchmark suite of 150 complex analytical queries:
-- **Execution Success Rate**: 93.4%
-- **Mean Latency**: 2.4 seconds per query
-- **Schema Mapping Precision**: 96.1%
+This was the most satisfying phase to build.
+
+ReportLab is a Python library that gives you full programmatic control over PDF layout. No templates, no HTML-to-PDF conversion — you build every element from scratch in Python code.
+
+The mental model is simple: ReportLab has a \`story\` — a list of \`Flowable\` objects that get laid out onto pages in order. You build the list, call \`doc.build(story)\`, and the library handles page breaks, margins, and layout.
+
+\`\`\`python
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer,
+    Image, HRFlowable, PageBreak
+)
+
+buf = io.BytesIO()
+
+doc = SimpleDocTemplate(buf, pagesize=A4,
+                        leftMargin=25*mm, rightMargin=25*mm,
+                        topMargin=20*mm, bottomMargin=20*mm)
+
+story = []
+
+# Title page
+story.append(Spacer(1, 30*mm))
+story.append(Paragraph('DataLens', title_style))
+story.append(Paragraph(chat.name, subtitle_style))
+story.append(HRFlowable(width='100%', thickness=1, color=accent_color))
+story.append(PageBreak())
+
+# Q&A sections
+for msg in messages:
+    story.append(Paragraph(msg.question, question_style))
+    story.append(Paragraph(msg.answer, answer_style))
+
+    if msg.chart_type != 'none':
+        chart_buf = regenerate_chart(msg)
+        story.append(Image(chart_buf, ...))
+
+doc.build(story)
+buf.seek(0)
+return buf
+\`\`\`
+
+The charts are re-generated on-the-fly — I pass a \`chart_generator\` closure into \`build_pdf()\` that reads the original CSV and rerenders the chart as a PNG. This is clean because no image bytes are stored in the database.
+
+The export route itself is simple:
+
+\`\`\`python
+@app.route('/export/<int:chat_id>')
+@login_required
+def export_pdf(chat_id):
+    chat = Chat.query.filter_by(id=chat_id, user_id=current_user.id).first_or_404()
+    pdf_buf = build_pdf(chat, list(chat.messages), chart_generator)
+    
+    return send_file(pdf_buf,
+                     mimetype='application/pdf',
+                     as_attachment=True,
+                     download_name=f'datalens_{chat.name.lower().replace(" ", "_")}.pdf')
+\`\`\`
+
+\`as_attachment=True\` adds \`Content-Disposition: attachment\` to the response — that's the HTTP header that tells the browser to download the file instead of trying to display it inline.
+
+---
+
+## The AI Part — How It Actually Works
+
+Most of the "magic" is in \`gemini_helper.py\` (badly named — it actually uses the Groq API, not Google Gemini, but I kept the filename to avoid breaking imports).
+
+The key insight: I **never send the full CSV to the AI**. Sending 2,800 rows to a language model would blow past the context limit, cost tokens, and be slow. Instead, I pre-process the CSV into a compact text summary:
+
+\`\`\`text
+Shape: 2823 rows × 25 columns
+
+Column Types:
+  Numeric: QUANTITYORDERED, PRICEEACH, SALES, MSRP
+  Categorical: STATUS, PRODUCTLINE, COUNTRY, TERRITORY
+
+Statistics (numeric columns):
+  SALES: mean=3553.89, std=1841.87, min=482.13, max=14082.80
+
+Top Values:
+  PRODUCTLINE: Classic Cars (967), Vintage Cars (607), Motorcycles (331)
+  COUNTRY: USA (1004), Spain (342), France (314)
+
+Missing Values: None
+
+Sample Rows:
+ORDERNUMBER  SALES  PRODUCTLINE  COUNTRY
+10107        2871   Motorcycles  USA
+...
+\`\`\`
+
+This summary — not the raw CSV — gets sent to the AI. It's maybe 800 tokens vs. tens of thousands. The model can answer most analytical questions accurately from this structured summary.
+
+Three separate AI calls happen for each question:
+
+1. \`get_ai_insight()\` — the main call. Gets the text answer. Includes the last 5 exchanges as context so follow-up questions work properly.
+2. \`suggest_chart_type()\` — a separate call with \`temperature=0\` (deterministic). Returns exactly one word: \`bar\`, \`line\`, \`scatter\`, \`histogram\`, \`pie\`, or \`none\`. Low temperature because I need a parseable response, not creativity.
+3. \`suggest_chart_columns()\` — another separate call. Returns JSON with \`x\` and \`y\` column names. I parse this, validate against the actual column list, and fall back to sensible defaults if the AI hallucinates a column name that doesn't exist.
+
+Why three calls instead of one? When I tried to get everything in one call, the AI would sometimes get distracted and return malformed JSON, or mix the chart suggestion into the text answer. Separating concerns made each call simpler and more reliable.
+
+---
+
+## Everything That Went Wrong — Summary
+
+| Problem | Cause | Fix |
+| :--- | :--- | :--- |
+| **\`hashlib has no attribute 'scrypt'\`** | Python 3.9 missing scrypt support | Explicitly use \`method='pbkdf2:sha256'\` in \`generate_password_hash\` |
+| **Upload returning 500** | CSV with non-UTF-8 characters | \`try: pd.read_csv(f) except UnicodeDecodeError: pd.read_csv(f, encoding='latin1')\` |
+| **Data preview table blank** | Pandas \`NaN\` serializes as bare \`NaN\` — invalid JSON | \`df.where(pd.notnull(df), None)\` before \`to_dict()\` |
+| **\`LegacyAPIWarning\` on every request** | \`User.query.get()\` deprecated in SQLAlchemy 2.x | Replace with \`db.session.get(User, user_id)\` |
+| **Auth routes returning 404** | Thought Blueprint was at \`/auth/login\` | Routes are at \`/login\` — no prefix. \`url_for('auth.login')\` still works |
+| **Chart generator silent failure in PDF** | CSV no longer on disk when exporting old chat | Added early check \`if not os.path.exists(chat.csv_path)\` before rendering |
+
+The \`NaN\` one cost me the most time. The symptom was completely confusing — server returned 200, JavaScript got a response, but the table was blank. Silent failure. Turned out \`response.json()\` was throwing a parse error because \`NaN\` is not valid JSON (it's \`null\` in JSON), and the whole preview section was quietly dying in a catch block. Classic.
+
+---
+
+## What I'd Do Differently
+
+1. **Proper file storage** — Right now CSVs are saved to a local \`uploads/\` folder. If the server restarts, old chat sessions can't reload their charts because the files are gone. In production I'd use S3 — store the CSV path as an S3 key, not a local filesystem path.
+2. **Background jobs for AI calls** — Right now the \`/ask\` endpoint blocks until the AI responds — usually 3–8 seconds. A better pattern is to return a job ID immediately, process the AI call in a background worker (Celery, or even a simple thread), and have the frontend poll or use WebSockets for the result. Feels much faster.
+3. **Streaming AI responses** — The Groq API supports streaming responses — you can start sending tokens to the frontend as they arrive, exactly like ChatGPT does. The current setup waits for the full response before returning. Streaming would feel dramatically faster even if total time is the same.
+4. **PDF charts as stored images** — Right now the PDF export re-generates charts from the original CSV. If the CSV is gone, charts are skipped silently. Better to store the chart image in S3 alongside the CSV, and reference it directly in the PDF.
+
+---
+
+## Key Takeaways
+
+- **Send summaries to AI, not raw data.** Structured text summaries are more token-efficient, equally informative for analysis, and let you control exactly what context the model has. This is the pattern most production data AI tools use.
+- **Separate your AI calls.** One call for the text answer, a separate call for chart type, another for column selection. Each prompt is simpler, outputs are more parseable, and failures are isolated.
+- **SQLAlchemy's cascades are powerful.** \`cascade='all, delete-orphan'\` One time and your entire data hierarchy cleans up automatically. No manual delete queries across tables.
+- **Flask Blueprints are just an organisation.** They're not especially complex — they're a way to split a growing \`app.py\` list into logical groups. Start using them before your app file gets too big, not after.
+- **\`NaN\` is not \`null\`**. In JSON, missing values are \`null\`. Python's \`float('nan')\` serializes to bare \`NaN\` which browsers can't parse. Always sanitize DataFrames before JSONifying them.
+
+---
+
+## Resources
+
+- GitHub repo: \`github.com/shlokbam/ai-data-analyst\`
+- Groq API docs
+- Flask-Login documentation
+- SQLAlchemy ORM tutorial
+- ReportLab user guide
 `,
     content_type: "BUILD",
     category: "AI",
-    tags: ["AI", "Agents", "FastAPI", "SQL", "LangGraph"],
-    reading_time: "8 min read",
+    tags: ["AI", "Flask", "Python", "Groq", "Pandas", "Matplotlib", "ReportLab"],
+    reading_time: "13 min read",
     status: "PUBLISHED",
     featured: true,
-    published_at: "2026-09-24",
-    cover_image: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop",
+    published_at: "2026-03-25",
+    cover_image: "https://images.unsplash.com/photo-1551288049-bebda4e38f71?q=80&w=1000&auto=format&fit=crop",
     author: "Shlok Bam",
     project_slug: null,
-    github_repo: "shlokbam/abac-copilot"
+    github_repo: "shlokbam/ai-data-analyst"
   },
   {
     id: 3,
-    title: "Testing 5 LLMs for Structured Data Extraction & Schema Alignment",
-    slug: "testing-5-llms-for-structured-data-extraction",
-    excerpt: "An empirical benchmarking study analyzing accuracy, latency, token consumption, and Pydantic schema compliance across Claude 3.5 Sonnet, GPT-4o, Qwen 2.5, Llama 3.3, and DeepSeek R1.",
+    title: "I Built an AI-Powered Mock Interview Platform from Scratch — Here's Everything That Went Wrong",
+    slug: "i-built-an-ai-powered-mock-interview-platform-from-scratch-here-s-everything-that-went-wrong",
+    excerpt: "A full walkthrough of building MockVue — React + FastAPI + TiDB Cloud + Groq AI + face-api.js — including every bug, every architectural decision, and every 'why is this not working' moment.",
     content: `
-# Empirical LLM Evaluation: Structured JSON & Pydantic Extraction
+![MockVue AI Powered Mock Interview Banner](mockvue-hero)
 
-Extracting strictly validated JSON objects from noisy unstructured documents (PDFs, invoice scans, web pages) is a core requirement in enterprise AI pipelines.
+# Before We Start — Why I Built This
 
-In this experiment, I evaluated five state-of-the-art models on a benchmark set of **500 complex medical & financial documents**.
+I was preparing for campus placements. And I kept reading about companies like JPMorgan, Goldman Sachs, and TCS using AI-powered video assessment platforms for first-round interviews. You record yourself answering questions. An AI grades you. You never even speak to a human until the second round.
 
----
+The problem? There was no good way to practice for this format. Mock interview tools either had fake questions, no video component, or gave you generic feedback like "speak more clearly." None of them actually simulated what these AI platforms do.
 
-## Benchmark Metrics
+So I stopped looking for one and built it.
 
-Models were evaluated across four core dimensions:
-1. **Schema Compliance**: Percentage of responses passing \`Pydantic.BaseModel.model_validate_json()\`.
-2. **Field Extraction Accuracy**: Micro F1-score across nested JSON attributes.
-3. **Latency (TTFT & Total)**: Time-to-first-token and total generation time.
-4. **Cost Efficiency**: Total token expense per 1,000 extractions.
+MockVue is a full-stack AI mock interview platform. You pick a company and role, answer 5 video questions under timed conditions, and get an AI-generated score across three dimensions: answer quality, speaking confidence, and eye contact. The feedback is detailed, the questions are company-specific, and the experience is close to what the actual platforms feel like.
+
+This is the full story of building it — the architecture, every technical decision, every bug, and every "oh that's why" moment.
 
 ---
 
-## Key Findings
+## What I Built
 
-| Model | Schema Compliance | F1 Score | Avg Latency | Cost / 1k docs |
-| :--- | :--- | :--- | :--- | :--- |
-| **Claude 3.5 Sonnet** | 99.8% | **96.4%** | 1.8s | \$3.20 |
-| **GPT-4o** | 99.4% | 94.8% | **1.2s** | \$2.50 |
-| **DeepSeek R1** | 98.2% | 95.1% | 3.4s | **\$0.55** |
-| **Qwen 2.5 72B (Local)** | 97.6% | 91.2% | 2.1s | Self-hosted |
-| **Llama 3.3 70B** | 96.8% | 90.5% | 1.9s | Self-hosted |
+![MockVue End-to-End Architecture](mockvue-architecture)
+
+A user picks a company (Google, JPMorgan, TCS, etc.) and a role. They get 5 questions. For each question: 30 seconds to read, 2 minutes to answer on camera. The platform records their video, tracks their eye contact using AI in real time, transcribes their audio on the server, and then sends everything to another AI model that grades the answer against a rubric.
+
+Here's how the system fits together:
+
+\`\`\`text
+User's Browser
+    │
+    ├─ Camera + Mic (MediaRecorder API)
+    ├─ Real-time eye tracking (face-api.js)
+    └─ Real-time speech analysis (Web Speech API)
+    │
+    ▼
+React + Vite Frontend (Vercel)
+    │
+    │ POST /answers (multipart: audio + analytics)
+    ▼
+FastAPI Backend (Render)
+    │
+    ├─ Whisper (Groq) — transcribes audio
+    ├─ Llama 3.3 70B (Groq) — grades answer vs rubric
+    └─ Stores result
+    │
+    ▼
+TiDB Cloud (Serverless MySQL)
+\`\`\`
+
+Every time you submit an answer ➔ audio goes to Groq Whisper ➔ transcript goes to Groq Llama ➔ scores come back ➔ everything gets saved ➔ you see a detailed feedback report.
+
+### Tech Stack:
+
+| What | Tool |
+| :--- | :--- |
+| **Frontend** | React 19 + Vite |
+| **Backend** | FastAPI (Python 3.12) |
+| **Database** | TiDB Cloud Serverless |
+| **AI Evaluation** | Groq (Llama 3.3 70B + Whisper) |
+| **Eye Tracking** | face-api.js |
+| **Frontend Host** | Vercel |
+| **Backend Host** | Render |
+| **Auth** | JWT (python-jose + bcrypt) |
 
 ---
 
-## Takeaways & Production Recommendation
+## Phase 1 — The Question Bank
 
-For mission-critical production pipelines requiring zero schema failures, **Claude 3.5 Sonnet** remains the gold standard. However, for cost-sensitive high-throughput extraction workloads, pairing **DeepSeek R1** for initial extraction with local **Qwen 2.5** verification offers a 5x cost reduction with minimal accuracy degradation.
+Before I wrote a single line of frontend code, I needed something to interview users with. A mock interview platform with generic questions is useless. I wanted company-specific, role-specific questions that felt like the real thing.
+
+I curated 270+ behavioural and situational questions across 13 companies (Google, Amazon, Microsoft, Adobe, Meta, Netflix, Flipkart, JPMorgan, Goldman Sachs, TCS, Infosys, Swiggy, Zomato) and 5 roles per company (Software Engineer, Product Manager, Data Analyst, UX Designer, Operations).
+
+Each question has a rubric. Here's an example:
+
+\`\`\`json
+{
+  "company": "JPMorgan",
+  "role": "Software Engineer",
+  "question_text": "Describe a technical challenge you faced and how you resolved it.",
+  "rubric": [
+    {"point": "Clearly described the technical problem", "points": 8},
+    {"point": "Explained your thought process and approach", "points": 8},
+    {"point": "Mentioned specific technologies or tools used", "points": 8},
+    {"point": "Quantified the result or outcome", "points": 8},
+    {"point": "Reflected on what you learned", "points": 8}
+  ],
+  "model_answer": "During my internship, our microservice was crashing..."
+}
+\`\`\`
+
+> 💡 **Simple version:** Instead of asking the AI "was this answer good?", I give it a checklist with point values. It scores each item on the checklist separately. This means feedback is specific — "you didn't mention the outcome" — instead of just "answer was mediocre."
+
+The rubric matters because it's what the AI uses for grading. Instead of just asking "was this answer good?", I send Groq the rubric and ask it to score each point specifically. This produces much more actionable feedback.
+
+I also built a \`seed_db.py\` script so anyone can clone the repo and populate their database in one command:
+
+\`\`\`bash
+cd backend
+python3 seed_db.py
+\`\`\`
+
+One important design decision: I built a fallback. If someone picks a company/role combination that has no specific questions, the backend returns General HR questions instead of a 404 error. The app never fails silently.
+
+---
+
+## Phase 2 — The Backend (FastAPI + TiDB Cloud)
+
+### Why FastAPI?
+FastAPI was the right choice for one specific reason: it handles async I/O natively, and I was going to be making multiple Groq API calls per answer submission. With a synchronous framework, each API call blocks the server. FastAPI's async handlers let me structure the code cleanly even on a budget hosting plan.
+
+### The Database Setup
+I chose TiDB Cloud Serverless. It's MySQL-compatible, has a free tier, runs entirely in the cloud, and scales to zero — which matters on a student budget.
+
+The tricky part was SSL configuration. TiDB Cloud requires SSL, and the CA certificate path is different on every operating system. I wrote a fallback chain to handle this automatically:
+
+\`\`\`python
+ca_paths = [
+    "/etc/ssl/cert.pem",                  # Render / Alpine
+    "/etc/ssl/certs/ca-certificates.crt", # Ubuntu / Debian
+    "/etc/pki/tls/certs/ca-bundle.crt"    # CentOS / RHEL
+]
+ca_path = next((p for p in ca_paths if os.path.exists(p)), None)
+connect_args = {"ssl": {"ca": ca_path}}
+\`\`\`
+
+> 💡 **Simple version:** SSL is like a security handshake between your app and the database. To do that handshake, your app needs a specific certificate file — but that file lives in different places on different servers. This code tries each possible location in order until it finds one that exists.
+
+This is one of those things that works perfectly on your local Mac and then fails on Render because Render uses a different Linux distribution. The fallback chain saved me from an hour of debugging SSL errors in production.
+
+The database also had a driver issue. TiDB's connection string sometimes comes back from the dashboard as \`mysql://\` without the \`+pymysql\` specifier. SQLAlchemy doesn't know which MySQL driver to use — it defaults to MySQLdb, which I hadn't installed. One-line fix:
+
+\`\`\`python
+if "mysql://" in DATABASE_URL and "+pymysql" not in DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.replace("mysql://", "mysql+pymysql://")
+\`\`\`
+
+> 💡 **Simple version:** The database URL is like an address that tells your app how to connect. The "driver" is like choosing which vehicle to use to get there. This line makes sure the right vehicle (PyMySQL) is always specified, even if the address string forgot to mention it.
+
+One line. But it took me 45 minutes to figure out why my database wouldn't connect when the credentials were clearly correct.
+
+### The Data Models
+Five models: User, Question, Session, Answer, Feedback.
+
+The \`Answer\` model is the most complex — it stores everything about a single response:
+
+\`\`\`python
+class Answer(Base):
+    transcript          = Column(Text)
+    answer_score        = Column(Float)   # out of 40 — Groq grades
+    confidence_score    = Column(Float)   # out of 30 — computed locally
+    eye_contact_score   = Column(Float)   # out of 30 — from face-api
+    filler_word_count   = Column(Integer)
+    filler_word_breakdown = Column(JSON)  # {"um": 3, "like": 2}
+    speaking_pace       = Column(Float)   # WPM
+    pause_count         = Column(Integer)
+    gaze_percentage     = Column(Float)   # 0-100
+    groq_feedback       = Column(JSON)    # full Groq response
+\`\`\`
+
+The total score (answer + confidence + eye contact) adds up to 100. Content matters most (40%), but delivery and presence both count significantly (30% each).
+
+### JWT Authentication
+Standard JWT auth — register, login, protected routes. One detail that matters: token expiry is set to 7 days. For a practice platform where users return daily, forcing re-login after an hour would be annoying. 7 days is the right balance.
+
+> 💡 **Simple version:** JWT is like a temporary pass. When you log in, the server gives you a pass with an expiry date stamped on it. Every time you open the app, you show that pass instead of logging in again. After 7 days the pass expires and you log in once more.
+
+---
+
+## Phase 3 — The AI Evaluation Pipeline
+
+This is the core of MockVue and where most of the interesting engineering happened.
+
+When a user submits an answer, three things need to happen:
+1. Transcribe the audio (Groq Whisper)
+2. Grade the transcript against a rubric (Groq Llama 3.3 70B)
+3. Compute confidence metrics (local calculation)
+
+### Step 1: Audio Transcription
+I originally let the browser's Web Speech API handle transcription. It runs locally and is free. But it had two problems: it's unreliable on mobile, and it varies by browser. Some users were getting no transcript at all.
+
+The solution: record the raw audio with MediaRecorder and send it to the backend for Whisper to transcribe:
+
+\`\`\`python
+if audio:
+    client = Groq(api_key=api_key)
+    transcription = client.audio.translations.create(
+        file=(filename, audio_data),
+        model="whisper-large-v3-turbo",
+        response_format="verbose_json"
+    )
+    transcript = transcription.text.strip()
+\`\`\`
+
+> 💡 **Simple version:** The browser tries to convert your speech to text in real time, but it often misses things. So instead I also record the actual audio file and send it to Whisper — OpenAI's dedicated speech-to-text model — on the server. Whisper is much more accurate, especially for accented English.
+
+The \`verbose_json\` format is important. It returns timestamps for each speech segment, which I use to compute pauses:
+
+\`\`\`python
+segments = getattr(transcription, "segments", [])
+for i in range(1, len(segments)):
+    if segments[i]["start"] - segments[i-1]["end"] >= 3.0:
+        current_pause_count += 1
+\`\`\`
+
+Any gap longer than 3 seconds between speech segments counts as a long pause. Whisper gives me this for free.
+
+### Step 2: Answer Grading with Llama
+
+\`\`\`python
+user_prompt = f"""Interview Question: {question_text}
+
+Rubric (total {total_points} points):
+{rubric_text}
+
+Student's Answer: {transcript}
+
+Score each rubric point and provide specific feedback. Return JSON
+{{
+  "rubric_scores": [
+    {{"point": "rubric point text", "score": N, "max": N, "feedback": "text"}}
+  ],
+  "overall_feedback": "2-3 sentences of specific, actionable feedback",
+  "summary": "one sentence summary of the answer quality",
+  "total_answer_score": N
+}}"""
+\`\`\`
+
+> 💡 **Simple version:** I'm basically giving the AI a marking scheme and a student's answer, and asking it to fill in a scorecard. By telling it exactly what JSON structure to return, I can reliably parse the response in code.
+
+Three specific design choices here:
+
+1. **Structured output via prompt engineering.** I don't use Groq's JSON mode — I tell the model exactly what JSON structure to return in plain English. The fallback parser strips code blocks in case the model wraps the JSON in backticks anyway:
+
+\`\`\`python
+match = re.search(r'\{.*\}', raw, re.DOTALL)
+if match:
+    return json.loads(match.group())
+\`\`\`
+
+2. **Low temperature (0.3).** Interview grading should be consistent. I don't want the same answer to get a 28/40 one day and a 35/40 the next.
+
+> 💡 **Simple version:** "Temperature" in AI models controls how creative/random the output is. 0 = always the same answer. 1 = creative and unpredictable. For grading, I want 0.3 — consistent, but not robotically identical.
+
+3. **Graceful degradation.** If Groq fails (rate limit, network error, invalid key), I return a fallback response with zero scores instead of crashing:
+
+\`\`\`python
+except Exception as e:
+    return {
+        "rubric_scores": [
+            {"point": r["point"], "score": 0, "max": r["points"],
+             "feedback": "Could not evaluate."}
+            for r in rubric
+        ],
+        "overall_feedback": "Could not evaluate your answer at this time.",
+        "total_answer_score": 0
+    }
+\`\`\`
+
+The user still gets their confidence and eye contact scores. Their session isn't lost. This kind of defensive programming matters in production.
+
+### Step 3: Confidence Scoring
+This is computed entirely on the backend without any AI. I designed a custom scoring formula:
+
+\`\`\`python
+def compute_confidence_score(filler_count, wpm, pause_count):
+    # Max 30 points total
+    filler_score = max(0.0, 15.0 - filler_count * 1.5)  # # 15 pts max
+    
+    if 120 <= wpm <= 150:
+        wpm_score = 8.0                                 # # 8 pts max
+    else:
+        distance = min(abs(wpm - 120), abs(wpm - 150))
+        wpm_score = max(0.0, 8.0 - distance * 0.1)
+        
+    pause_score = max(0.0, 7.0 - pause_count * 2.0)     # # 7 pts max
+    
+    return round(filler_score + wpm_score + pause_score, 1)
+\`\`\`
+
+> 💡 **Simple version:** Three things make you sound confident: not saying "um/uh/like" too much (15 pts), speaking at the right speed — 120 to 150 words per minute (8 pts), and not going silent for more than 3 seconds too often (7 pts). This function just does that math.
+
+The ideal speaking pace is 120–150 WPM — the range commonly cited for professional presentations. Too fast sounds nervous; too slow sounds unsure. The penalty function is smooth, not binary, so someone at 115 WPM isn't punished as harshly as someone at 80 WPM.
+
+---
+
+## The BYOK (Bring Your Own Key) Decision
+
+This was the most consequential product decision I made. MockVue requires users to provide their own Groq API key.
+
+> 💡 **Simple version:** Instead of paying for everyone's AI calls out of my own pocket, each user connects their own free Groq account. Groq gives every account a free usage quota, so each user gets their own limit instead of everyone sharing mine.
+
+Why? Because Groq gives every user a free tier with generous limits. If I ran all evaluations through a single API key, I'd hit rate limits within hours of a few users practicing. By having each user bring their own key, every user gets their own quota, and I pay $0 in API costs.
+
+The key is verified before it's saved:
+
+\`\`\`python
+@router.post("/verify-api-key")
+def verify_api_key(data: schemas.ApiKeyVerify):
+    try:
+        client = Groq(api_key=data.api_key)
+        client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": "ping"}],
+            max_tokens=5
+        )
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid API Key")
+\`\`\`
+
+A tiny test call — 5 tokens — confirms the key works before saving it. If the key is invalid or the user is over quota, we tell them immediately instead of letting them discover it mid-interview.
+
+---
+
+## Phase 4 — The Frontend
+
+### The Interview Flow
+The interview has a deliberate flow built around real AI video assessment platforms:
+
+\`\`\`text
+Setup Page ➔ Camera Check ➔ Interview Page ➔ Processing ➔ Feedback
+\`\`\`
+
+Each transition is intentional. The Camera Check page verifies four things before allowing the user to start:
+1. Camera access and video feed
+2. Microphone access and audio levels
+3. face-api.js models loaded
+4. Groq API key active (live test call)
+
+If any of these fail, the user can't start. This prevents a situation where someone answers 5 questions and discovers their microphone was muted the whole time.
+
+### The Reading Phase
+One detail that makes MockVue feel like a real assessment: the 30-second reading phase before recording starts. Real AI interview platforms give you reading time. I replicated this with a countdown timer and a beep at 10 seconds remaining:
+
+\`\`\`javascript
+const playBeep = () => {
+  const ctx = new AudioContext();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.frequency.value = 880;
+  gain.gain.setValueAtTime(0.3, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+  osc.start();
+  osc.stop(ctx.currentTime + 0.3);
+};
+\`\`\`
+
+> 💡 **Simple version:** The Web Audio API lets you generate sound from scratch in the browser — no audio file needed. I create an oscillator (a tone generator), ramp the volume down quickly to get a sharp beep sound, and play it for 0.3 seconds. One beep = "recording starts in 10 seconds."
+
+Pure Web Audio API. No library needed for a simple beep.
+
+---
+
+## Eye Contact — The Hard Part
+
+This was the most technically complex part of the entire project.
+
+> 💡 **Simple version:** face-api.js is a library that looks at your webcam video and finds faces in it. I use it to figure out whether you're looking at the camera or looking away, and track what percentage of your recording time you spent looking at the camera.
+
+face-api.js is a TensorFlow.js-based library that can detect faces and landmarks in a browser video feed. I use two models: TinyFaceDetector (fast, small) and FaceLandmark68TinyNet (68 facial landmarks).
+
+The naive implementation would be: "is a face detected? yes ➔ looking at camera." But that's wrong. Someone looking down at notes has their face in frame but is clearly not looking at the camera.
+
+The better approach: use facial landmarks to estimate head orientation. Specifically, I use the nose tip and eye positions to compute a lateral ratio:
+
+\`\`\`javascript
+const eyeSpan = rightEye[3].x - leftEye[0].x;
+const noseOffset = nose[0].x - leftEye[0].x;
+const ratio = noseOffset / eyeSpan;
+
+// Ratio ~0.5 = nose is centered between eyes = facing forward
+const isFrontal = ratio > 0.35 && ratio < 0.65;
+\`\`\`
+
+> 💡 **Simple version:** When you look straight at the camera, your nose tip is roughly halfway between your two eyes (horizontally). When you look left or right, the nose appears to "shift" toward one eye. I measure this shift — if the nose is between 35% and 65% across the eye span, you're looking at the camera. If it's outside that range, you're looking away.
+
+### Problem: face-api.js model files
+The models are binary weight files (~1–3 MB each) that need to be served as static assets. I couldn't import them from npm — I had to download them and put them in \`public/models/\`. I wrote a Node.js download script for this:
+
+\`\`\`javascript
+const FILES = [
+  'tiny_face_detector_model-weights_manifest.json',
+  'tiny_face_detector_model-shard1',
+  'face_landmark_68_tiny_model-weights_manifest.json',
+  'face_landmark_68_tiny_model-shard1',
+];
+\`\`\`
+
+Anyone cloning the repo needs to run this script once before starting the frontend. I missed this in my first README draft and got confused when models silently failed to load on a fresh machine.
+
+### Problem: macOS Safari video readyState
+On Safari, \`video.readyState\` can stay at 1 (HAVE_METADATA) even when the video looks like it's playing. The face detection interval was running but the video element wasn't actually producing pixel data yet, so every frame returned null.
+
+> 💡 **Simple version:** readyState is the video's way of saying how ready it is. State 1 means "I know the video exists." State 2 means "I have actual frames to show you." Safari was stuck at 1, so when face detection asked "what does the video look like right now?" the answer was "nothing." Fix: only run detection when readyState is at least 2.
+
+Fix: check \`readyState >= 2\` before running detection, and force-call \`video.play()\` in the interval callback as a safety measure.
+
+### Problem: gaze percentage accuracy
+Early testing showed gaze percentages of 20–40% for people clearly looking at the camera. I dropped the face detection score threshold from 0.5 to 0.2 and expanded the frontal ratio window from 0.4–0.6 to 0.35–0.65. After this, numbers for someone looking directly at the camera consistently landed in the 75–90% range.
+
+---
+
+## Phase 5 — The Camera Check Page
+
+The Camera Check page looks simple but has a lot of defensive code underneath. Getting camera and microphone access in a browser is surprisingly fragile. Different operating systems, browsers, and hardware all behave differently. I went through four iterations before the hardware probe logic became reliable:
+
+\`\`\`javascript
+try {
+  // Attempt 1: Combined request
+  stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+} catch (probeErr) {
+  // Attempt 2: Split request
+  stream = await navigator.mediaDevices.getUserMedia({ video: true });
+  try {
+    const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.addTrack(audioStream.getAudioTracks()[0]);
+  } catch (audioErr) {
+    // Attempt 3: Raw audio — bypasses strict macOS CoreAudio
+    const rawAudio = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false }
+    });
+    stream.addTrack(rawAudio.getAudioTracks()[0]);
+  }
+}
+\`\`\`
+
+> 💡 **Simple version:** Asking for camera and microphone permission can fail in several ways. Instead of giving up on the first failure, I try three progressively simpler requests. The last attempt disables audio processing features (echo cancellation, noise reduction) because macOS sometimes blocks the request when those are turned on and another app is already using the mic.
+
+There's also device selection — dropdowns for switching between multiple cameras or microphones. One subtle point: \`enumerateDevices()\` doesn't show device labels until the user has already granted permission. So the order wrong and all devices show as "Camera 1", "Microphone 2" with no useful labels.
+
+> 💡 **Simple version:** For privacy reasons, your browser won't tell a website the names of your cameras and microphones until you've already said "yes" to the permission prompt. So the flow must be: ask permission first ➔ then list devices with their real names. Doing it the other way round gets you blank labels.
+
+---
+
+## Phase 6 — Deployment and Cloud Architecture
+
+### Frontend on Vercel
+The frontend deployment was the easiest part. Push to GitHub, connect to Vercel, set the \`VITE_API_BASE_URL\` environment variable to the Render URL, done. The only non-obvious config was \`vercel.json\`:
+
+\`\`\`json
+{
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+}
+\`\`\`
+
+> 💡 **Simple version:** React apps have one HTML file (\`index.html\`) and React handles all the different "pages" in JavaScript. But if you directly visit \`/dashboard\` in the browser, Vercel looks for a file called \`dashboard.html\`, doesn't find it, and returns a 404. This config tells Vercel: "for any URL, just load index.html and let React figure out the rest."
+
+### Backend on Render
+Render's free tier has a cold start problem. If no requests come in for 15 minutes, the service spins down. The next request takes 30–50 seconds while the server wakes up.
+
+I handled this with a "waking up" overlay that detects slow initial connections:
+
+\`\`\`javascript
+const timeout = setTimeout(() => {
+  setWakingUp(true);
+}, 2500);
+
+api.get('/').then(() => {
+  clearTimeout(timeout);
+  setWakingUp(false);
+});
+\`\`\`
+
+> 💡 **Simple version:** If the backend doesn't respond within 2.5 seconds, I assume it's asleep and show a friendly message explaining the wait. If it responds quickly, the message never appears. This stops users from thinking the app is broken — they know it's just warming up.
+
+If the backend doesn't respond within 2.5 seconds, a friendly "we're on the free tier, this takes ~40 seconds" message appears with a progress bar. Users don't rage-quit; they wait. Honest communication about infrastructure limitations is a UX choice.
+
+The database connection also had a cold start issue. Without the \`pool_pre_ping\` option, the first database query after a server wakeup fails with "MySQL server has gone away":
+
+\`\`\`python
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    connect_args=connect_args
+)
+\`\`\`
+
+> 💡 **Simple version:** SQLAlchemy keeps a pool of open database connections ready to use. But after the server sleeps and wakes up, those old connections are dead — the database closed them. \`pool_pre_ping=True\` tells SQLAlchemy to test each connection before using it, and automatically create a fresh one if the old one is dead.
+
+---
+
+## Everything That Went Wrong — Summary
+
+Here's every significant bug I hit and how I fixed it.
+
+### Bug 1: CORS errors on first deployment
+The frontend was sending \`Authorization: Bearer <token>\` headers. CORS preflight requests for credentialed requests are handled differently and were getting blocked.
+
+Fix: Make sure \`allow_credentials\` and \`allow_origins\` are compatible — you can't use \`["*"]\` for origins with \`allow_credentials=True\` simultaneously.
+
+> 💡 **Simple version:** CORS is a browser security feature that asks the server "is it okay if this website talks to you?" When your request carries a login token, the browser asks this question even more strictly. Getting the server's CORS settings slightly wrong causes the browser to block the request entirely, even though the server itself would have been happy to respond.
+
+### Bug 2: MediaRecorder codec mismatch on iOS Safari
+On iOS, \`audio/webm\` is not supported by MediaRecorder. The recording silently produced an empty blob.
+
+\`\`\`javascript
+let mimeType = 'audio/webm';
+if (!MediaRecorder.isTypeSupported(mimeType)) {
+  mimeType = 'audio/mp4';
+}
+\`\`\`
+
+The file extension sent to Groq Whisper also needs to match the actual format:
+
+\`\`\`javascript
+let ext = 'webm';
+if (window.mv_audio_blob.type.includes('mp4')) ext = 'mp4';
+formData.append('audio', window.mv_audio_blob, \`audio.\${ext}\`);
+\`\`\`
+
+> 💡 **Simple version:** Different browsers record audio in different file formats — like how some cameras save as JPEG, others as PNG, others as HEIC. Whisper needs to know the format to decode it. If the file says it's \`.webm\` but it's actually \`.mp4\` inside, Whisper rejects it. This took two hours to debug because the failure was completely silent — no error, just no transcript.
+
+### Bug 3: React StrictMode double-mount submitting answers twice
+In React 18+ with StrictMode, every \`useEffect\` runs twice on mount in development. My Processing page was calling the answer submission API twice, creating duplicate records.
+
+Fix: A ref guard:
+
+\`\`\`javascript
+const hasSubmitted = useRef(false);
+
+useEffect(() => {
+  if (!hasSubmitted.current) {
+    hasSubmitted.current = true;
+    submitAnswer();
+  }
+}, []);
+\`\`\`
+
+> 💡 **Simple version:** React's "Strict Mode" deliberately runs your setup code twice in development to help catch bugs. Usually harmless — but if your setup code calls an API, it sends the request twice. A \`useRef\` variable persists across both runs, so I use it as a "has this already run?" flag. \`useState\` doesn't work here because React resets state between the two runs.
+
+### Bug 4: TiDB Cloud connection timing out on Render cold start
+The database connection would succeed locally but time out on Render after cold start.
+
+\`\`\`python
+connect_args["connect_timeout"] = 10
+\`\`\`
+
+> 💡 **Simple version:** By default, SQLAlchemy waits forever for a database connection to succeed. On Render, after a cold start, the database might take a few seconds to accept connections. Without a timeout, if anything goes wrong, the request just hangs forever instead of failing and letting you retry. 10 seconds is generous enough to handle slow wakeups but short enough to fail fast if something is actually broken.
+
+### Bug 5: face-api.js models loading race condition
+The gaze detection interval would start before the models finished loading and throw errors on every frame.
+
+Fix: Always check \`faceapi.nets.tinyFaceDetector.isLoaded\` at the start of the detection interval:
+
+\`\`\`javascript
+if (!faceapi.nets.tinyFaceDetector.isLoaded) return; // skip this frame
+\`\`\`
+
+> 💡 **Simple version:** The AI models are downloaded from the server asynchronously in the background. But I was starting the detection interval immediately. So for the first few seconds, the interval was running and asking the AI to analyze frames before the AI model had even finished downloading. The fix: just skip any frame where the model isn't ready yet.
+
+### Bug 6: Session score showing 0 mid-interview
+The session's \`overall_score\` was only calculated when the session was marked "complete." Users checking their dashboard mid-interview would see a score of 0.
+
+Fix: Recalculate and update the session score in real-time every time an answer is submitted:
+
+\`\`\`python
+answers = db.query(models.Answer).filter(models.Answer.session_id == session_id).all()
+if answers:
+    total = sum((a.answer_score or 0) + (a.confidence_score or 0) + (a.eye_contact_score or 0) for a in answers)
+    session.overall_score = round(total / len(answers), 1)
+\`\`\`
+
+### Bug 7: Whisper returning empty transcript for short answers
+If a user spoke for less than 2 seconds, Whisper sometimes returned an empty string.
+
+Fix: Fall back to the browser's Web Speech API transcript if Whisper returns empty:
+
+\`\`\`python
+result_text = transcription.text.strip()
+if result_text:
+    transcript = result_text
+# else: keep the frontend transcript already in the form data
+\`\`\`
+
+> 💡 **Simple version:** I always send two versions of the transcript to the server: one from the browser's built-in speech recognition (sent as a form field), and one from Whisper (generated on the server from the audio file). If Whisper returns nothing, I use the browser's version as backup. Having two independent sources means something always goes through.
+
+---
+
+## Phase 8 — The Feedback Report
+
+Every MockVue score adds up to 100:
+
+| Component | Max | How it's calculated |
+| :--- | :--- | :--- |
+| **Answer Quality** | 40 | Groq Llama grades against rubric |
+| **Confidence** | 30 | Filler words (15) + WPM (8) + Pauses (7) |
+| **Eye Contact** | 30 | \`gaze_percentage × 0.3\` |
+
+The feedback report breaks down every dimension with specific callouts. The transcript is highlighted — filler words in amber, quality buzzwords in green. The WPM gauge shows pace against the 120–150 ideal zone. The gaze timeline shows a visual representation of camera presence across the recording.
+
+One thing I'm proud of: the priority tip on the Session Complete page. After your session, the system identifies which dimension you scored lowest on proportionally and gives you a specific practice recommendation:
+
+\`\`\`javascript
+const lowestArea = Math.min(avgAnswer / 40, avgConfidence / 30, avgGaze / 30) === avgAnswer / 40
+  ? { area: 'Answer Quality', tip: 'Focus on the STAR method...' }
+  : Math.min(avgConfidence / 30, avgGaze / 30) === avgConfidence / 30
+  ? { area: 'Confidence', tip: 'Practise out loud daily...' }
+  : { area: 'Eye Contact', tip: 'Place a sticker dot above your camera...' };
+\`\`\`
+
+> 💡 **Simple version:** Raw scores aren't comparable — 20/40 on answers isn't the same as 20/30 on eye contact. So I convert each score to a percentage of its maximum (answer: /40, confidence: /30, eye contact: /30) before comparing. The lowest percentage tells me which area genuinely needs the most work.
+
+---
+
+## What I'd Do Differently
+
+1. **Use a job queue for AI processing.** Right now the answer submission endpoint is synchronous — it calls Whisper, then Llama, then saves to database, all in one request. On Render's free tier this takes 8–15 seconds while the connection hangs. A proper solution would queue the AI processing and let the frontend poll for results.
+2. **Add rate limiting.** The \`/auth/register\` endpoint has no rate limiting. A bot could create thousands of accounts. Libraries like \`slowapi\` for FastAPI make this a 10-minute addition.
+3. **Store recordings temporarily.** Right now the audio blob is processed and discarded. Storing it for 24 hours in S3 would let users replay their answers alongside the transcript — significantly more useful for self-improvement.
+4. **Calibrate eye tracking per user.** The nose-to-eye ratio works for most setups but breaks if someone's camera is off-center or they have an unusual setup. A brief calibration step at the Camera Check page would make scores more accurate.
+5. **Ship the feedback report first.** I built the scoring system last, but it's the most important thing from a user perspective. I should have designed the feedback report first and worked backwards to figure out what data I needed to collect. I wasted time building features that didn't contribute to the quality of the feedback.
+
+---
+
+## Key Takeaways
+
+- **The BYOK model is underrated.** Making users bring their own API keys is usually seen as friction. For this use case, it was the right call. Every user gets their own rate limit, infrastructure costs stay at $0, and the app can scale without me paying per-evaluation.
+- **Defensive code is worth every line.** The three-attempt hardware probe, the Whisper fallback, the \`pool_pre_ping\`, the \`hasSubmitted\` ref guard — none of these are in tutorials. They all came from real failures. Every edge case I handled made the app more trustworthy.
+- **Face detection in the browser is doable but finicky.** face-api.js is mature, but integrating it with MediaRecorder and real-time React state requires care. The key insight: run it in a \`setInterval\`, not in React's rendering cycle. Keep all heavy computation in refs.
+- **Honest UI for free-tier limitations is good UX.** Instead of hiding the cold start problem, I surfaced it with a friendly message. Users understood. They waited. Nobody complained about the 40-second wakeup time in feedback — they complained about things I could actually fix.
+- **Real projects break in real ways.** Every tutorial shows you the happy path. Building MockVue meant hitting SSL certificate paths, iOS codec incompatibilities, React StrictMode double-mounts, browser permission ordering requirements, and model loading race conditions. Debugging these is the actual job of a developer.
+
+---
+
+## Resources
+
+- Live app: \`mock-vue.vercel.app\`
+- GitHub: \`github.com/shlokbam/MockVue\`
+- Groq API (free): \`console.groq.com\`
+- face-api.js: \`github.com/vladmandic/face-api\`
+- TiDB Cloud: \`tidbcloud.com\`
+- FastAPI docs: \`fastapi.tiangolo.com\`
 `,
-    content_type: "EXPLORE",
+    content_type: "BUILD",
     category: "AI",
-    tags: ["LLM", "Benchmarking", "Pydantic", "Python", "Data"],
-    reading_time: "6 min read",
+    tags: ["React", "FastAPI", "TiDB", "Groq", "Whisper", "Llama 3.3", "face-api.js", "Vercel"],
+    reading_time: "28 min read",
     status: "PUBLISHED",
     featured: true,
-    published_at: "2026-09-20",
-    cover_image: "https://images.unsplash.com/photo-1620712943543-bcc4688e7485?q=80&w=1000&auto=format&fit=crop",
+    published_at: "2026-04-05",
+    cover_image: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?q=80&w=1000&auto=format&fit=crop",
     author: "Shlok Bam",
     project_slug: null,
-    github_repo: null
-  },
-  {
-    id: 4,
-    title: "Why Simple Systems Beat Complex Architectures: Engineering Pragmatism",
-    slug: "why-simple-systems-beat-complex-architectures",
-    excerpt: "Reflections on microservice fatigue, Premature Abstraction, and why simple monorepos with PostgreSQL and background workers outlive complex distributed systems.",
-    content: `
-# Engineering Pragmatism in the Age of Over-Engineering
-
-It is easy to make a software system complex. It takes deep discipline to keep it simple.
-
-Over the past few years, the software industry has developed a bias toward architectural complexity — introducing Kafka topics for simple event queues, Kubernetes clusters for single backend apps, and microservice meshes before product-market fit.
-
----
-
-## The Hidden Cost of Microservice Fatigue
-
-When systems are prematurely split into microservices:
-- **Observability complexity explodes**: Tracing a single user request requires distributed logging and telemetry.
-- **Transactional integrity suffers**: Replacing ACID database transactions with saga patterns introduces edge-case failure modes.
-- **Developer velocity slows down**: Local setup requires 15 Docker containers running simultaneously.
-
----
-
-## The Pragmatic Tech Stack
-
-For 90% of engineering applications:
-1. **Monolithic FastAPI / Node.js backend**: Clean modular layout, simple testing, fast local execution.
-2. **PostgreSQL / MySQL with JSONB & Indexes**: Single source of truth with relational integrity and flexible JSON fields.
-3. **Redis + Celery / Background Workers**: Async job execution without complex message brokers.
-4. **Vite / React Frontend**: Fast client-side rendering with static asset caching.
-
-Keep it simple until operational metrics prove you need distributed scaling.
-`,
-    content_type: "THINK",
-    category: "Architecture",
-    tags: ["Engineering", "Architecture", "Python", "Database"],
-    reading_time: "5 min read",
-    status: "PUBLISHED",
-    featured: false,
-    published_at: "2026-09-14",
-    cover_image: "https://images.unsplash.com/photo-1507238691740-187a5b1d37b8?q=80&w=1000&auto=format&fit=crop",
-    author: "Shlok Bam",
-    project_slug: null,
-    github_repo: null
+    github_repo: "shlokbam/MockVue"
   }
 ];
 
