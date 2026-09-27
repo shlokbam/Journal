@@ -7,7 +7,7 @@ import rehypeRaw from 'rehype-raw';
 import 'highlight.js/styles/atom-one-dark.css';
 import { motion, useScroll, useSpring } from 'framer-motion';
 
-import { ArrowLeft, Calendar, Clock, Share2, Copy, Check } from 'lucide-react';
+import { ArrowLeft, Calendar, Clock, Share2, Copy, Check, ArrowUp } from 'lucide-react';
 import { Github } from '../components/ui/Icons';
 import { postsApi } from '../services/api';
 import { Badge } from '../components/ui/Badge';
@@ -82,6 +82,24 @@ export function ArticleDetail() {
     postsApi.getBySlug(slug).then((data) => {
       setPost(data);
       setLoading(false);
+
+      if (data) {
+        // Dynamic title and meta tags for social media previews (WhatsApp, Twitter, LinkedIn)
+        document.title = `${data.title} | Shlok Bam Journal`;
+        
+        const updateMeta = (selector, attr, content) => {
+          let el = document.querySelector(selector);
+          if (el && content) {
+            el.setAttribute(attr, content);
+          }
+        };
+        
+        updateMeta('meta[property="og:title"]', 'content', data.title);
+        updateMeta('meta[property="og:description"]', 'content', data.excerpt);
+        updateMeta('meta[property="og:url"]', 'content', window.location.href);
+        updateMeta('meta[name="twitter:title"]', 'content', data.title);
+        updateMeta('meta[name="twitter:description"]', 'content', data.excerpt);
+      }
 
       if (data?.content) {
         // Extract headings for Table of Contents

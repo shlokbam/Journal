@@ -1,22 +1,15 @@
-import React, { useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Navbar } from './components/navigation/Navbar';
 import { Footer } from './components/layout/Footer';
 import { NeuralBackground } from './components/ui/NeuralBackground';
+import { ScrollToTop } from './components/ui/ScrollToTop';
 
 import { Home } from './pages/Home';
 import { Journal } from './pages/Journal';
 import { ArticleDetail } from './pages/ArticleDetail';
 import { Experiments } from './pages/Experiments';
 import { About } from './pages/About';
-
-function ScrollToTop() {
-  const { pathname } = useLocation();
-  useEffect(() => {
-    window.scrollTo(0, 0);
-  }, [pathname]);
-  return null;
-}
 
 export default function App() {
   return (
