@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: journal_mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: journal_db
+      MYSQL_USER: journal_user
+      MYSQL_PASSWORD: journalpassword
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: journal_backend
+    restart: always
+    environment:
+      DATABASE_URL: mysql+pymysql://journal_user:journalpassword@mysql:3306/journal_db
+      JWT_SECRET: super-secret-shlokbam-journal-key-2026
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      CORS_ORIGINS: "*"
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mysql
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: journal_frontend
+    restart: always
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000/api
+    depends_on:
+      - backend
+
+volumes:
+  mysql_data:

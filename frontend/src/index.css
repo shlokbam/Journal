@@ -1,0 +1,198 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  
+  --color-bg-dark: #08090B;
+  --color-surface-dark: #0D1117;
+  --color-card-dark: #11141A;
+  --color-card-hover: #161B26;
+  --color-border-dark: #1D222B;
+  --color-border-bright: #2E3646;
+  
+  --color-text-main: #F5F7FA;
+  --color-text-muted: #9CA3AF;
+  --color-text-dim: #6B7280;
+  
+  --color-accent: #6C8CFF;
+  --color-accent-hover: #8BA5FF;
+  --color-accent-glow: rgba(108, 140, 255, 0.15);
+}
+
+:root {
+  color-scheme: dark;
+  background-color: #08090B;
+  color: #F5F7FA;
+  font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #08090B;
+  color: #F5F7FA;
+  min-height: 100vh;
+  overflow-x: hidden;
+  selection-background-color: rgba(108, 140, 255, 0.3);
+}
+
+::selection {
+  background-color: rgba(108, 140, 255, 0.3);
+  color: #ffffff;
+}
+
+/* Custom subtle tech grid pattern */
+.bg-tech-grid {
+  background-size: 32px 32px;
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+}
+
+.bg-radial-gradient {
+  background: radial-gradient(circle at 50% 0%, rgba(108, 140, 255, 0.08) 0%, rgba(8, 9, 11, 0) 70%);
+}
+
+.bg-dot-matrix {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #08090B;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1D222B;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #2E3646;
+}
+
+/* Article Markdown Styling */
+.prose-journal {
+  color: #D1D5DB;
+  font-size: 1.0625rem;
+  line-height: 1.8;
+}
+
+.prose-journal h1, 
+.prose-journal h2, 
+.prose-journal h3, 
+.prose-journal h4 {
+  color: #F5F7FA;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-top: 2.25rem;
+  margin-bottom: 1rem;
+  scroll-margin-top: 100px;
+}
+
+.prose-journal h1 { font-size: 2.25rem; }
+.prose-journal h2 { font-size: 1.65rem; border-bottom: 1px solid #1D222B; padding-bottom: 0.5rem; }
+.prose-journal h3 { font-size: 1.3rem; }
+
+.prose-journal p {
+  margin-top: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.prose-journal a {
+  color: #6C8CFF;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color 0.15s ease;
+}
+
+.prose-journal a:hover {
+  color: #8BA5FF;
+}
+
+.prose-journal strong {
+  color: #F5F7FA;
+  font-weight: 600;
+}
+
+.prose-journal code {
+  font-family: 'JetBrains Mono', monospace;
+  background-color: #11141A;
+  color: #6C8CFF;
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.25rem;
+  font-size: 0.875em;
+  border: 1px solid #1D222B;
+}
+
+.prose-journal pre {
+  background-color: #0D1117;
+  border: 1px solid #1D222B;
+  border-radius: 0.5rem;
+  padding: 1.25rem;
+  overflow-x: auto;
+  margin-top: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.prose-journal pre code {
+  background-color: transparent;
+  color: inherit;
+  padding: 0;
+  border-radius: 0;
+  border: none;
+  font-size: 0.9rem;
+}
+
+.prose-journal blockquote {
+  border-left: 3px solid #6C8CFF;
+  padding-left: 1.25rem;
+  font-style: italic;
+  color: #9CA3AF;
+  margin-top: 1.5rem;
+  margin-bottom: 1.5rem;
+  background: rgba(108, 140, 255, 0.03);
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-top-right-radius: 0.375rem;
+  border-bottom-right-radius: 0.375rem;
+}
+
+.prose-journal ul, .prose-journal ol {
+  padding-left: 1.5rem;
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+}
+
+.prose-journal li {
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.prose-journal table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.prose-journal th, .prose-journal td {
+  border: 1px solid #1D222B;
+  padding: 0.75rem 1rem;
+  text-align: left;
+}
+
+.prose-journal th {
+  background-color: #11141A;
+  color: #F5F7FA;
+  font-weight: 600;
+}
