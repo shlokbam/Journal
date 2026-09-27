@@ -1,7 +1,7 @@
 // API service layer with backend API integration + publication content fallback
 import { JOURNAL_POSTS, EXPERIMENTS_DATA, PROFILE_DATA } from './journalData';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://journal-backend-ypg5.onrender.com/api';
 
 async function fetchWithFallback(url, fallbackData) {
   try {
