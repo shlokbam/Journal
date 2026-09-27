@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
+import rehypeRaw from 'rehype-raw';
 import 'highlight.js/styles/atom-one-dark.css';
 
 import { ArrowLeft, Calendar, Clock, FolderGit2, Share2, Copy, Check } from 'lucide-react';
@@ -10,6 +11,7 @@ import { Github } from '../components/ui/Icons';
 import { postsApi } from '../services/api';
 import { Badge } from '../components/ui/Badge';
 import { TableOfContents } from '../components/articles/TableOfContents';
+import { ArticleImageEmbed } from '../components/articles/ArticleVisualEmbeds';
 
 export function ArticleDetail() {
   const { slug } = useParams();
@@ -145,7 +147,7 @@ export function ArticleDetail() {
         <main className="lg:col-span-8 prose-journal max-w-none">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
-            rehypePlugins={[rehypeHighlight]}
+            rehypePlugins={[rehypeRaw, rehypeHighlight]}
             components={{
               h1: ({ children }) => {
                 const id = String(children).toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
@@ -159,6 +161,7 @@ export function ArticleDetail() {
                 const id = String(children).toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
                 return <h3 id={id}>{children}</h3>;
               },
+              img: ({ src, alt }) => <ArticleImageEmbed src={src} alt={alt} />,
             }}
           >
             {post.content}

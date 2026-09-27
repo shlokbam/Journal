@@ -1,5 +1,5 @@
 // API service layer with backend API integration + mock data fallback
-import { MOCK_POSTS, MOCK_PROJECTS, MOCK_EXPERIMENTS, MOCK_PROFILE } from './mockData';
+import { MOCK_POSTS, MOCK_EXPERIMENTS, MOCK_PROFILE } from './mockData';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
@@ -43,17 +43,6 @@ export const postsApi = {
   }
 };
 
-export const projectsApi = {
-  getAll: async () => {
-    return await fetchWithFallback('/projects', MOCK_PROJECTS);
-  },
-  
-  getBySlug: async (slug) => {
-    const project = await fetchWithFallback(`/projects/${slug}`, MOCK_PROJECTS.find(p => p.slug === slug));
-    return project || MOCK_PROJECTS.find(p => p.slug === slug);
-  }
-};
-
 export const experimentsApi = {
   getAll: async () => {
     return await fetchWithFallback('/experiments', MOCK_EXPERIMENTS);
@@ -74,7 +63,7 @@ export const githubApi = {
 
 export const searchApi = {
   search: async (query) => {
-    if (!query || query.trim() === '') return { posts: [], projects: [], experiments: [] };
+    if (!query || query.trim() === '') return { posts: [], experiments: [] };
     const q = query.toLowerCase().trim();
     
     const posts = MOCK_POSTS.filter(p => 
@@ -83,18 +72,12 @@ export const searchApi = {
       p.tags.some(t => t.toLowerCase().includes(q))
     );
     
-    const projects = MOCK_PROJECTS.filter(p => 
-      p.name.toLowerCase().includes(q) || 
-      p.short_description.toLowerCase().includes(q) || 
-      p.technologies.some(t => t.toLowerCase().includes(q))
-    );
-    
     const experiments = MOCK_EXPERIMENTS.filter(e => 
       e.title.toLowerCase().includes(q) || 
       e.summary.toLowerCase().includes(q) || 
       e.tags.some(t => t.toLowerCase().includes(q))
     );
     
-    return { posts, projects, experiments };
+    return { posts, experiments };
   }
 };

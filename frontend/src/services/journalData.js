@@ -1,6 +1,6 @@
-// Mock content for Shlok.Bam Personal Tech Journal & Engineering Universe
+// Primary articles & publication content for Shlok.Bam Engineering Journal
 
-export const MOCK_POSTS = [
+export const JOURNAL_POSTS = [
   {
     id: 1,
     title: "I Built a Full DevOps CI/CD Pipeline from Scratch — Here's Everything That Went Wrong",
