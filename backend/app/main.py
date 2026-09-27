@@ -5,7 +5,7 @@ from app.core.config import settings
 from app.core.database import Base, engine, SessionLocal
 from app.models.models import Post, Tag, Experiment
 
-from app.api.routes import posts, experiments, github
+from app.api.routes import posts, experiments, github, rss
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -25,6 +25,7 @@ app.add_middleware(
 app.include_router(posts.router, prefix=f"{settings.API_V1_STR}/posts", tags=["posts"])
 app.include_router(experiments.router, prefix=f"{settings.API_V1_STR}/experiments", tags=["experiments"])
 app.include_router(github.router, prefix=f"{settings.API_V1_STR}/github", tags=["github"])
+app.include_router(rss.router, tags=["rss"])
 
 @app.on_event("startup")
 def on_startup():
