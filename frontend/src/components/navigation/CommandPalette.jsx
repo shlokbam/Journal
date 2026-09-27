@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, FileText, FlaskConical, ArrowRight, X, Command } from 'lucide-react';
+import { Search, FileText, FlaskConical, ArrowRight, X, CornerDownLeft } from 'lucide-react';
 import { searchApi } from '../../services/api';
 
 export function CommandPalette({ isOpen, onClose }) {
@@ -63,36 +63,36 @@ export function CommandPalette({ isOpen, onClose }) {
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center pt-20 px-4">
+        <div className="fixed inset-0 z-50 flex items-start justify-center pt-16 sm:pt-24 px-4">
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-black/80 backdrop-blur-sm"
+            className="fixed inset-0 bg-black/80 backdrop-blur-md"
           />
 
           <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: -10 }}
+            initial={{ opacity: 0, scale: 0.96, y: -12 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: -10 }}
-            transition={{ duration: 0.15 }}
-            className="relative w-full max-w-2xl bg-[#0D1117] border border-[#1D222B] rounded-xl shadow-2xl overflow-hidden z-10"
+            exit={{ opacity: 0, scale: 0.96, y: -12 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+            className="relative w-full max-w-2xl bg-[#0D1117]/95 backdrop-blur-xl border border-[#1D222B] rounded-xl shadow-2xl overflow-hidden z-10"
           >
             {/* Command Header */}
             <div className="flex items-center px-4 py-3.5 border-b border-[#1D222B]">
-              <Search className="w-5 h-5 text-[#9CA3AF] mr-3" />
+              <Search className="w-5 h-5 text-[#6C8CFF] mr-3 shrink-0" />
               <input
                 ref={inputRef}
                 type="text"
-                placeholder="Search articles & lab experiments..."
+                placeholder="Search articles, DevOps postmortems, topics..."
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 className="w-full bg-transparent text-[#F5F7FA] placeholder-[#6B7280] focus:outline-none text-sm font-sans"
               />
               <button
                 onClick={onClose}
-                className="p-1 rounded text-[#9CA3AF] hover:text-[#F5F7FA] hover:bg-[#11141A] transition-colors"
+                className="p-1 rounded text-[#9CA3AF] hover:text-[#F5F7FA] hover:bg-[#11141A] transition-colors ml-2"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -116,8 +116,10 @@ export function CommandPalette({ isOpen, onClose }) {
                           onClose();
                         }}
                         onMouseEnter={() => setSelectedIndex(idx)}
-                        className={`flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${
-                          isSelected ? 'bg-[#1D222B]/70 text-[#F5F7FA]' : 'text-[#9CA3AF] hover:bg-[#11141A]'
+                        className={`flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer transition-all duration-150 ${
+                          isSelected
+                            ? 'bg-[#161B26] border border-[#6C8CFF]/30 text-[#F5F7FA]'
+                            : 'text-[#9CA3AF] border border-transparent hover:bg-[#11141A]'
                         }`}
                       >
                         <div className="flex items-center gap-3 min-w-0">
@@ -128,14 +130,26 @@ export function CommandPalette({ isOpen, onClose }) {
                             <div className="text-sm font-medium text-[#F5F7FA] truncate">
                               {item.title}
                             </div>
-                            <div className="text-xs text-[#6B7280] truncate font-mono">
-                              {item.type.toUpperCase()} · {item.category || item.date}
+                            <div className="text-xs text-[#6B7280] truncate font-mono flex items-center gap-2 mt-0.5">
+                              <span>{item.type.toUpperCase()}</span>
+                              <span>•</span>
+                              <span>{item.category || item.date}</span>
+                              {item.tags && (
+                                <span className="text-[10px] text-[#6C8CFF]/80">
+                                  #{item.tags.slice(0, 2).join(' #')}
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
-                          {isSelected && <ArrowRight className="w-4 h-4 text-[#6C8CFF]" />}
+                          {isSelected && (
+                            <div className="flex items-center gap-1 text-xs font-mono text-[#6C8CFF]">
+                              <span>Open</span>
+                              <CornerDownLeft className="w-3.5 h-3.5" />
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -144,17 +158,24 @@ export function CommandPalette({ isOpen, onClose }) {
               )}
             </div>
 
-            {/* Footer help */}
-            <div className="flex items-center justify-between px-4 py-2 bg-[#08090B] border-t border-[#1D222B] text-[11px] font-mono text-[#6B7280]">
-              <div className="flex items-center gap-3">
-                <span>↑↓ Navigate</span>
-                <span>↵ Select</span>
-                <span>ESC Close</span>
+            {/* Footer Shortcut Hints */}
+            <div className="flex items-center justify-between px-4 py-2.5 bg-[#08090B] border-t border-[#1D222B] text-[11px] font-mono text-[#6B7280]">
+              <div className="flex items-center gap-4">
+                <span className="flex items-center gap-1">
+                  <kbd className="px-1.5 py-0.5 rounded bg-[#11141A] border border-[#1D222B]">↑</kbd>
+                  <kbd className="px-1.5 py-0.5 rounded bg-[#11141A] border border-[#1D222B]">↓</kbd>
+                  <span>Navigate</span>
+                </span>
+                <span className="flex items-center gap-1">
+                  <kbd className="px-1.5 py-0.5 rounded bg-[#11141A] border border-[#1D222B]">↵</kbd>
+                  <span>Select</span>
+                </span>
+                <span className="flex items-center gap-1">
+                  <kbd className="px-1.5 py-0.5 rounded bg-[#11141A] border border-[#1D222B]">ESC</kbd>
+                  <span>Close</span>
+                </span>
               </div>
-              <div className="flex items-center gap-1">
-                <Command className="w-3 h-3" />
-                <span>K</span>
-              </div>
+              <div>SHLOK.BAM SEARCH</div>
             </div>
           </motion.div>
         </div>

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
 
 export function TableOfContents({ headings }) {
   const [activeId, setActiveId] = useState('');
@@ -15,8 +16,8 @@ export function TableOfContents({ headings }) {
       { rootMargin: '-80px 0px -40% 0px' }
     );
 
-    const headingElements = headings.map(h => document.getElementById(h.id)).filter(Boolean);
-    headingElements.forEach(el => observer.observe(el));
+    const headingElements = headings.map((h) => document.getElementById(h.id)).filter(Boolean);
+    headingElements.forEach((el) => observer.observe(el));
 
     return () => observer.disconnect();
   }, [headings]);
@@ -25,10 +26,11 @@ export function TableOfContents({ headings }) {
 
   return (
     <nav className="space-y-3 font-mono text-xs">
-      <div className="text-[11px] font-bold text-[#6B7280] tracking-wider uppercase pb-2 border-b border-[#1D222B]">
-        ON THIS PAGE
+      <div className="text-[11px] font-bold text-[#6B7280] tracking-wider uppercase pb-2 border-b border-[#1D222B] flex items-center justify-between">
+        <span>ON THIS PAGE</span>
+        <span className="text-[10px] text-[#6C8CFF]">{headings.length} SECTIONS</span>
       </div>
-      <ul className="space-y-2">
+      <ul className="space-y-1 relative">
         {headings.map((item, idx) => {
           const num = String(idx + 1).padStart(2, '0');
           const isActive = activeId === item.id;
@@ -36,13 +38,22 @@ export function TableOfContents({ headings }) {
             <li key={item.id} style={{ paddingLeft: `${(item.level - 1) * 0.75}rem` }}>
               <a
                 href={`#${item.id}`}
-                className={`flex items-center gap-2 transition-colors py-1 ${
+                className={`group relative flex items-center gap-2.5 transition-all duration-200 py-1.5 px-2 rounded-md ${
                   isActive
-                    ? 'text-[#6C8CFF] font-medium'
-                    : 'text-[#9CA3AF] hover:text-[#F5F7FA]'
+                    ? 'text-[#F5F7FA] font-semibold bg-[#111622] border border-[#6C8CFF]/30'
+                    : 'text-[#9CA3AF] hover:text-[#F5F7FA] hover:bg-[#11141A]'
                 }`}
               >
-                <span className="text-[#6B7280]">{num}</span>
+                {isActive && (
+                  <motion.span
+                    layoutId="toc-active-indicator"
+                    className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-[#6C8CFF] rounded-r"
+                    transition={{ type: 'spring', stiffness: 350, damping: 30 }}
+                  />
+                )}
+                <span className={`text-[10px] ${isActive ? 'text-[#6C8CFF]' : 'text-[#6B7280]'}`}>
+                  {num}
+                </span>
                 <span className="truncate">{item.title}</span>
               </a>
             </li>
