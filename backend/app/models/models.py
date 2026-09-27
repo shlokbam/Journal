@@ -10,15 +10,6 @@ post_tags = Table(
     Column('tag_id', Integer, ForeignKey('tags.id', ondelete="CASCADE"), primary_key=True)
 )
 
-class User(Base):
-    __tablename__ = "users"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String(50), unique=True, index=True, nullable=False)
-    email = Column(String(100), unique=True, index=True, nullable=False)
-    password_hash = Column(String(255), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
 class Post(Base):
     __tablename__ = "posts"
     
@@ -50,39 +41,6 @@ class Tag(Base):
     slug = Column(String(50), unique=True, index=True, nullable=False)
 
     posts = relationship("Post", secondary=post_tags, back_populates="tags")
-
-class Project(Base):
-    __tablename__ = "projects"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), nullable=False)
-    slug = Column(String(100), unique=True, index=True, nullable=False)
-    short_description = Column(Text, nullable=False)
-    description = Column(Text, nullable=False)
-    technologies = Column(Text, nullable=False) # stored as json or comma separated
-    github_url = Column(String(500), nullable=True)
-    live_url = Column(String(500), nullable=True)
-    github_owner = Column(String(100), nullable=True)
-    github_repo = Column(String(100), nullable=True)
-    cover_image = Column(String(500), nullable=True)
-    status = Column(String(50), default="Active")
-    featured = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    build_logs = relationship("BuildLog", back_populates="project", cascade="all, delete-orphan")
-
-class BuildLog(Base):
-    __tablename__ = "build_logs"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    version = Column(String(50), nullable=False)
-    title = Column(String(255), nullable=False)
-    description = Column(Text, nullable=False)
-    date = Column(String(50), nullable=False)
-
-    project = relationship("Project", back_populates="build_logs")
 
 class Experiment(Base):
     __tablename__ = "experiments"

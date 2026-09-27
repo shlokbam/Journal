@@ -6,7 +6,7 @@ import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
 import 'highlight.js/styles/atom-one-dark.css';
 
-import { ArrowLeft, Calendar, Clock, FolderGit2, Share2, Copy, Check } from 'lucide-react';
+import { ArrowLeft, Calendar, Clock, Share2, Copy, Check } from 'lucide-react';
 import { Github } from '../components/ui/Icons';
 import { postsApi } from '../services/api';
 import { Badge } from '../components/ui/Badge';
@@ -121,24 +121,6 @@ export function ArticleDetail() {
             </button>
           </div>
         </div>
-
-        {/* Related project banner if present */}
-        {post.project_slug && (
-          <div className="p-4 rounded-xl bg-[#0D1117] border border-[#1D222B] flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <FolderGit2 className="w-5 h-5 text-[#6C8CFF]" />
-              <span className="text-xs font-mono text-[#9CA3AF]">
-                This article is part of the <strong className="text-[#F5F7FA]">ABAC Project</strong> case study.
-              </span>
-            </div>
-            <Link
-              to={`/projects/${post.project_slug}`}
-              className="px-3 py-1.5 text-xs font-mono bg-[#11141A] hover:bg-[#161B26] text-[#6C8CFF] border border-[#1D222B] rounded-lg transition-colors"
-            >
-              View Project ↗
-            </Link>
-          </div>
-        )}
       </header>
 
       {/* Main Grid: Content + TOC */}

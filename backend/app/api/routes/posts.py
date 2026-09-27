@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.core.database import get_db
-from app.core.security import get_current_user
 from app.models.models import Post, Tag, post_tags
 from app.schemas.schemas import PostOut, PostCreate
 
@@ -24,9 +23,8 @@ def get_posts(
         search_fmt = f"%{query}%"
         q = q.filter((Post.title.ilike(search_fmt)) | (Post.excerpt.ilike(search_fmt)))
     
-    posts = q.order_by(Post.id.desc()).all()
+    posts = q.order_by(Post.id.asc()).all()
     
-    # Format tags for response
     result = []
     for p in posts:
         post_dict = {
@@ -78,7 +76,6 @@ def get_post_by_slug(slug: str, db: Session = Depends(get_db)):
 @router.post("", response_model=PostOut)
 def create_post(
     post_in: PostCreate,
-    current_user: str = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     post = Post(

@@ -35,41 +35,6 @@ class PostOut(PostBase):
     class Config:
         from_attributes = True
 
-class BuildLogSchema(BaseModel):
-    id: Optional[int] = None
-    version: str
-    title: str
-    description: str
-    date: str
-
-    class Config:
-        from_attributes = True
-
-class ProjectBase(BaseModel):
-    name: str
-    slug: str
-    short_description: str
-    description: str
-    technologies: List[str]
-    github_url: Optional[str] = None
-    live_url: Optional[str] = None
-    github_owner: Optional[str] = None
-    github_repo: Optional[str] = None
-    cover_image: Optional[str] = None
-    status: str = "Active"
-    featured: bool = False
-    build_logs: List[BuildLogSchema] = []
-    github_data: Optional[Dict[str, Any]] = None
-
-class ProjectCreate(ProjectBase):
-    pass
-
-class ProjectOut(ProjectBase):
-    id: int
-
-    class Config:
-        from_attributes = True
-
 class ExperimentSchema(BaseModel):
     id: int
     title: str
@@ -86,13 +51,4 @@ class ExperimentSchema(BaseModel):
 
 class SearchResponse(BaseModel):
     posts: List[PostOut]
-    projects: List[ProjectOut]
     experiments: List[ExperimentSchema]
-
-class UserLogin(BaseModel):
-    username: str
-    password: str
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str

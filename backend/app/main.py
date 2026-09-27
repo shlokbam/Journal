@@ -3,9 +3,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database import Base, engine, SessionLocal
-from app.models.models import Post, Tag, Project, BuildLog, Experiment
+from app.models.models import Post, Tag, Experiment
 
-from app.api.routes import posts, projects, experiments, github
+from app.api.routes import posts, experiments, github
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -23,7 +23,6 @@ app.add_middleware(
 
 # Include public content routers
 app.include_router(posts.router, prefix=f"{settings.API_V1_STR}/posts", tags=["posts"])
-app.include_router(projects.router, prefix=f"{settings.API_V1_STR}/projects", tags=["projects"])
 app.include_router(experiments.router, prefix=f"{settings.API_V1_STR}/experiments", tags=["experiments"])
 app.include_router(github.router, prefix=f"{settings.API_V1_STR}/github", tags=["github"])
 
@@ -856,6 +855,42 @@ You learn more from things breaking than from things working.
             existing.content = devops_content
             existing.reading_time = "20 min read"
             existing.published_at = "2026-03-14"
+
+        # Seed Article 2: DataLens
+        datalens_slug = "i-built-an-ai-data-analyst-app-from-scratch-here-s-how-i-taught-a-flask-app-to-think"
+        if not db.query(Post).filter(Post.slug == datalens_slug).first():
+            datalens_post = Post(
+                title="I Built an AI Data Analyst App from Scratch — Here's How I Taught a Flask App to Think",
+                slug=datalens_slug,
+                excerpt="A full walkthrough of building DataLens — CSV uploads, Groq/Llama 3.3 70B AI insights, auto-generated charts, user auth, persistent chat history, and PDF export.",
+                content="![DataLens AI Data Analyst Banner](datalens-hero)\n\n# Before We Start — Why I Built This\n\nI've been getting into AI APIs lately. I built DataLens — an app where you upload any CSV, ask questions in natural language, get AI-powered insights, and get automatically generated charts.\n\n## Tech Stack\n- Web Framework: Python Flask\n- Database: SQLAlchemy + SQLite\n- AI: Groq API (Llama 3.3 70B)\n- Charting: Matplotlib\n- PDF Generation: ReportLab\n",
+                content_type="BUILD",
+                category="AI",
+                reading_time="13 min read",
+                status="PUBLISHED",
+                featured=True,
+                published_at="2026-03-25",
+                github_repo="shlokbam/ai-data-analyst"
+            )
+            db.add(datalens_post)
+
+        # Seed Article 3: MockVue
+        mockvue_slug = "i-built-an-ai-powered-mock-interview-platform-from-scratch-here-s-everything-that-went-wrong"
+        if not db.query(Post).filter(Post.slug == mockvue_slug).first():
+            mockvue_post = Post(
+                title="I Built an AI-Powered Mock Interview Platform from Scratch — Here's Everything That Went Wrong",
+                slug=mockvue_slug,
+                excerpt="A full walkthrough of building MockVue — React + FastAPI + TiDB Cloud + Groq AI + face-api.js — including every bug, every architectural decision, and every 'why is this not working' moment.",
+                content="![MockVue AI Powered Mock Interview Banner](mockvue-hero)\n\n# Before We Start — Why I Built This\n\nMockVue is a full-stack AI mock interview platform. You pick a company and role, answer 5 video questions under timed conditions, and get an AI-generated score across three dimensions.\n\n## Tech Stack\n- Frontend: React 19 + Vite\n- Backend: FastAPI (Python 3.12)\n- Database: TiDB Cloud Serverless\n- AI: Groq (Llama 3.3 70B + Whisper)\n- Eye Tracking: face-api.js\n",
+                content_type="BUILD",
+                category="AI",
+                reading_time="28 min read",
+                status="PUBLISHED",
+                featured=True,
+                published_at="2026-04-05",
+                github_repo="shlokbam/MockVue"
+            )
+            db.add(mockvue_post)
 
         db.commit()
 
