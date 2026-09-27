@@ -52,6 +52,23 @@ export const JOURNAL_POSTS = [
     author: "Shlok Bam",
     project_slug: null,
     github_repo: "shlokbam/MockVue"
+  },
+  {
+    id: 4,
+    title: "I Built an Enterprise LMS with Local Cloud & DevOps from Scratch — Here's Everything That Went Wrong",
+    slug: "i-built-an-enterprise-lms-with-local-cloud-devops-from-scratch-here-s-everything-that-went-wrong",
+    excerpt: "A full architectural walkthrough of building Eagle LMS — React + FastAPI + MySQL + Expo Mobile + LocalStack S3 + Terraform + Jenkins — including real-time PDF watermarking, Docker port conflicts, and S3 path-style routing.",
+    content_type: "BUILD",
+    category: "DevOps",
+    tags: ["FastAPI", "React", "React Native", "Docker", "Terraform", "Jenkins", "LocalStack", "AWS S3", "MySQL", "ReportLab"],
+    reading_time: "25 min read",
+    status: "PUBLISHED",
+    featured: true,
+    published_at: "2026-04-18",
+    cover_image: "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?q=80&w=1000&auto=format&fit=crop",
+    author: "Shlok Bam",
+    project_slug: null,
+    github_repo: "shlokbam/lms"
   }
 ];
 

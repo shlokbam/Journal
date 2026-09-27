@@ -1939,6 +1939,414 @@ const lowestArea = Math.min(avgAnswer / 40, avgConfidence / 30, avgGaze / 30) ==
             existing_mockvue.reading_time = "28 min read"
             existing_mockvue.published_at = "2026-04-05"
 
+        # Seed 4th Article — Eagle LMS
+        lms_slug = "i-built-an-enterprise-lms-with-local-cloud-devops-from-scratch-here-s-everything-that-went-wrong"
+        lms_content = """![Building Eagle LMS Banner](hero-banner)
+
+# Building Eagle LMS: How I Led a Full-Stack Industry-Sponsored Project from Napkin to Production
+
+**By Shlok Bam — Project Lead, Eagle LMS**  
+**Academic Guide:** Mrs. Pallavi Malji Khalde  
+**Industry Mentors:** Mr. Manish Godse & Mr. Shashikant Sir, Eagle Industrial Services Pvt. Ltd.  
+
+This is a deep-dive into a real, ongoing, industry-sponsored college project. The code is reviewed. The product is in testing. The bugs were real. I'm writing this while it's still fresh — because in six months, you forget the pain.
+
+---
+
+## 1. Why I Built This
+
+**Eagle Industrial Services Pvt. Ltd.** is a Pune-based security and facility management company with over 2,500 employees, 110+ clients, and 15+ years in operations. They run everything from security guard deployment to housekeeping and QRT (Quick Response Team) response teams.
+
+This project was given to our entire department as an industry-sponsored initiative, with different teams taking on different modules of a larger system. Our team of five was assigned the **Learning Management System** — the training and assessment platform for Eagle's workforce.
+
+Eagle already had an operational system in place. It was not broken — a company operating at their scale with their client base doesn't survive on broken systems. But the LMS component specifically was an area identified for modernisation. The goal was to build something purpose-built for their training workflows: **phased content delivery**, **scheduled assessments**, **per-user progress tracking**, and **performance reports** that a trainer could actually use.
+
+Mr. Manish Godse came to our college with a clear picture of what was needed. We listened, we documented everything, and we built it.
+
+---
+
+## 2. What I Built
+
+Eagle LMS is a full-stack training platform built specifically for Eagle Industrial Services. It has three core parts:
+
+1. **A Web Portal for Trainers and Trainees (React + Vite):** Trainers create modules, upload materials, schedule sessions, create timed MCQ tests, and view performance reports. Trainees access enrolled modules, open materials, take tests, and track progress.
+2. **A React Native Mobile App (Expo):** Built for both roles (trainers and trainees) after the web portal was validated across the first three meetings.
+3. **A Shared FastAPI Backend:** Serving both web and mobile from the same API endpoints and the same MySQL database.
+
+The system is **role-based** (trainer vs trainee), **phase-aware** (materials and tests unlock based on whether a session is pre, live, or post), and includes **per-user watermarking** on every PDF and image served to trainees.
+
+### Architecture Overview
+
+```text
+┌────────────────────────────────────────────────────────┐
+│                     CLIENT LAYER                       │
+│                                                        │
+│   React + Vite (Web)          React Native + Expo      │
+│   ┌─────────────┐             ┌─────────────────┐      │
+│   │ Trainer UI  │             │  Trainer App    │      │
+│   │ Trainee UI  │             │  Trainee App    │      │
+│   └──────┬──────┘             └────────┬────────┘      │
+└──────────┼─────────────────────────────┼───────────────┘
+           │ JWT Bearer Token            │ JWT Bearer Token
+           ▼                             ▼
+┌─────────────────────────────────────────────────────────┐
+│                  FastAPI BACKEND                        │
+│                                                         │
+│   /api/auth     /api/trainer    /api/trainee            │
+│   /api/notifications  /api/progress  /uploads/{file}    │
+│                                                         │
+│   Auth Layer: JWT decode → role check → dependency      │
+│   File Layer: watermark generated per user on serve     │
+└────────────────────────────┬────────────────────────────┘
+                             │ SQLAlchemy ORM
+                             ▼
+┌─────────────────────────────────────────────────────────┐
+│                     MySQL DATABASE                      │
+│                                                         │
+│  users → modules → chapters → materials                 │
+│       → tests → questions → test_attempts               │
+│       → enrollments → progress → notifications          │
+└─────────────────────────────────────────────────────────┘
+```
+
+> 💡 **Simple version:** Think of it like Udemy, but built specifically for a security company's internal training. Trainers are like course creators. Trainees are like students. The backend is the engine connecting them. The database is where everything is stored.
+
+---
+
+## 3. Tech Stack
+
+| Layer | Technology | Why We Chose It |
+| :--- | :--- | :--- |
+| **Backend API** | FastAPI (Python) | Fast, async, auto-generates docs at `/docs` |
+| **ORM** | SQLAlchemy 2.0 | Declarative models, clean query interface |
+| **Database** | MySQL 8 + PyMySQL | Production-grade, relational, matches existing infra |
+| **Auth** | JWT + SHA-256 | Matched existing Flask app's password hashing |
+| **File Handling** | Pillow + pypdf + ReportLab | Per-user watermarking on PDFs and images |
+| **Web Frontend** | React 18 + Vite + Router v6 | Fast dev server, SPA routing, component model |
+| **HTTP Client** | Axios | Interceptors for JWT attachment and 401 auto-redirect |
+| **Mobile** | React Native + Expo | Cross-platform iOS/Android from one codebase |
+| **Mobile Storage** | Expo SecureStore | JWT stored securely on device, not in plain storage |
+| **Styling** | Custom CSS design system | Full dark/light mode, no component library needed |
+
+---
+
+## 4. The Journey — Meeting by Meeting
+
+| # | Title | What Happened |
+| :--- | :--- | :--- |
+| **Meeting 1** | Requirements | Mr. Godse explained the full system precisely. We documented every requirement. This session became the spec — and it saved us from rework later. |
+| **Meeting 2** | First Demo | Two weeks later — full UI + functionality shown. He was impressed. Still had UI and logic gaps. We wrote down every correction. |
+| **Meeting 3** | Refined Build | Improved UI and functionality approved. Database, frontend, and backend validated. More small corrections guided. |
+| **Meeting 4** | Mobile Brief | Fully satisfied with web portal. New ask: build a mobile app for trainers and trainees. We had never done React Native before. |
+| **Meeting 5** | Mobile Demo Crash | App crashed during demo. Sir was calm. He gave UI feedback, then asked us to build the trainer app too. |
+| **Meeting 6** | Full Sync Demo | Both apps syncing with web in real-time. Trainer creates on web, trainee sees it on mobile instantly. Sir tells us next meeting will include a technical reviewer. |
+| **Meeting 7** | Shashikant Sir Review | Longest meeting. App crashed again. Both sirs were calm. Shashikant Sir walked through the whole codebase, explained Eagle's operational workflow, what gaps our system fills, and what improvements to make. Told us to push to GitHub and make him a contributor. |
+
+---
+
+## 5. Phase by Phase: How I Actually Built It
+
+### Phase 1 — Requirements & Database Design
+
+The first meeting with Mr. Manish Godse set the tone for the entire project. He didn't come with vague ideas. He came with a clear picture — role-based access, phased content release, timed tests, watermarked materials, performance reports. I noted down every requirement precisely.
+
+The database schema came directly from this meeting. I designed it before writing a single line of application code:
+
+```text
+users (id, name, email, password, role, phone, department, profile_pic)
+  │
+  ├── modules (trainer_id, title, description, category,
+  │           start_datetime, end_datetime, status,
+  │           training_type, meet_link, color)
+  │     │
+  │     ├── chapters (module_id, title, order_num)
+  │     │     └── materials (chapter_id, title, file_path,
+  │     │                   release_phase, order_num)
+  │     │
+  │     ├── tests (module_id, title, test_type[pre/mid/post],
+  │     │         duration_minutes, passing_marks, max_attempts)
+  │     │       └── questions (test_id, question_text,
+  │     │                     option_a/b/c/d, correct_option, marks)
+  │     │             └── test_attempts (test_id, trainee_id,
+  │     │                               score, percentage, passed)
+  │     │
+  │     └── enrollments (module_id, trainee_id)
+  │
+  └── progress (module_id, trainee_id, material_id, completed)
+      notifications (user_id, title, body, type, is_read)
+```
+
+> 💡 **Simple version:** Before writing code, I drew out exactly what information the system needed to store and how everything connects. This is called a database schema — the blueprint for your data. A good schema designed upfront saves you from painful restructuring later.
+
+---
+
+### Phase 2 — Backend API
+
+The backend is a FastAPI application split into domain-specific routers: `auth`, `trainer`, `trainee`, `progress`, `notifications`, and `files`. Every protected route uses a dependency injection chain that decodes the JWT, loads the user, and optionally checks their role:
+
+```python
+def get_current_user(credentials, db) -> models.User:
+    token = credentials.credentials
+    payload = decode_token(token)
+    if not payload:
+        raise HTTPException(401, "Invalid or expired token")
+    user = db.query(models.User).filter(
+        models.User.id == int(payload.get('sub'))
+    ).first()
+    return user
+
+def require_trainer(current_user = Depends(get_current_user)):
+    if current_user.role != "trainer":
+        raise HTTPException(403, "Trainer access required")
+    return current_user
+```
+
+> 💡 **Simple version:** Every time a request arrives at a protected route, this code runs first — automatically. It checks: is this person logged in? Do they have permission? Think of it as a security guard at every door who checks your ID before letting you through.
+
+One specific auth decision deserves explanation. Eagle already had an existing application that used SHA-256 password hashing. Bcrypt is more secure, but switching would have invalidated every existing employee account. So I matched the existing behaviour intentionally — a pragmatic tradeoff chosen with full awareness of its implications.
+
+#### Phase-Based Content Locking
+
+Materials are tagged as `pre`, `live`, or `post`. The system calculates the current module phase from its start and end datetimes, then determines what's accessible:
+
+```python
+PHASE_ORDER = {'pre': 1, 'live': 2, 'post': 3, 'upcoming': 0}
+
+def canAccess(matPhase, modulePhase):
+    return PHASE_ORDER[matPhase] <= PHASE_ORDER[modulePhase]
+```
+
+A pre-session PDF is accessible during pre, live, and post. A post-session summary is locked until the session has started. This logic is enforced both on the frontend (UI shows 'Locked') and on the backend (the file serve endpoint checks the phase before serving the file).
+
+> 💡 **Simple version:** Imagine a textbook where chapter 3 is glued shut until you finish chapter 2. That's what this does — certain training materials only unlock at the right stage of the session.
+
+---
+
+### Phase 3 — The Watermarking System
+
+Every PDF and image served to a trainee gets a personalised watermark containing the company name and the trainee's email address. It is generated on-the-fly the first time a user accesses a file, then cached for subsequent requests:
+
+```python
+@router.get('/uploads/{filename}')
+def serve_file(filename, token, db):
+    current_user = _get_user_from_request(token, db)
+    if current_user and current_user.role == 'trainee':
+        wm_filename = f'wm_{current_user.id}_{filename}'
+        wm_path = os.path.join(UPLOAD_DIR, wm_filename)
+        if not os.path.exists(wm_path):
+            text = f'Eagle Securities | {current_user.email}'
+            if ext == 'pdf':
+                watermark_pdf(file_path, wm_path, text)
+            else:
+                watermark_image(file_path, wm_path, text)
+        return FileResponse(wm_path)
+```
+
+> 💡 **Simple version:** If a trainee downloads a training PDF and shares it externally, every page shows their name and email. Each person gets their own copy of the file with their identity baked in. This discourages leaking of confidential training materials.
+
+For PDFs, this uses `pypdf` to overlay a `ReportLab` canvas with rotated semi-transparent text on every page. For images, `Pillow` composites a tiled text overlay at low opacity. The file is generated once per user-file pair and cached on disk.
+
+---
+
+### Phase 4 — The Web Frontend
+
+The web frontend is a React SPA with React Router v6, built entirely with a custom CSS design system using CSS variables. No Tailwind, no component library — all custom. The design system supports full dark/light mode via a `data-theme` attribute on the `html` element.
+
+The test engine was particularly interesting to build. A trainee gets a timed MCQ test with a countdown timer. The timer lives in React state, decremented via `setTimeout`, and auto-submits at zero. Critically, score calculation is done server-side:
+
+```python
+# Backend score calculation — client sends answers, server checks
+score = 0
+for q in questions:
+    if answers_dict.get(str(q.id)) == q.correct_option:
+        score += q.marks
+
+pct = (score / total * 100)
+passed = pct >= test.passing_marks
+```
+
+> 💡 **Simple version:** Always calculate grades on the server, never on the client. A user could manipulate JavaScript in their browser to send a fake score. The server doesn't trust what the client says the score was — it recalculates it from the raw answers.
+
+The result page has an animated SVG score ring — a circle with `stroke-dashoffset` that animates to the score percentage. The trainer reports page shows per-trainee, per-test performance in a table with pass/fail badges.
+
+---
+
+### Phase 5 — Learning React Native and Building the Mobile App
+
+After meeting four, the brief was clear: build a mobile app. I had never written React Native before.
+
+I spent a week learning the fundamentals — `View` instead of `div`, `StyleSheet` instead of CSS, a separate navigation library, `expo-document-picker` for files, `expo-secure-store` for secure token storage instead of `localStorage`. The concepts carry over from React Web, but every primitive is different.
+
+The mobile app shares the same FastAPI backend. The base URL auto-detects the development machine's IP so Android emulators can reach the host machine:
+
+```javascript
+const debuggerHost = Constants.expoConfig?.hostUri;
+let localhost = debuggerHost ? debuggerHost.split(':')[0] : 'localhost';
+
+if (Platform.OS === 'android' && localhost === 'localhost') {
+  localhost = '10.0.2.2'; // Android emulator → host machine
+}
+```
+
+> 💡 **Simple version:** Android emulators run inside a virtual machine. They can't use 'localhost' to reach your laptop's server — they use a special address (10.0.2.2) that means 'the computer I'm running inside of.' This line handles that automatically.
+
+---
+
+## 6. Every Bug That Hurt
+
+### Bug 1 — The Cascading State Problem
+This was the most persistent pain point of the entire project. Because the application is large and heavily interconnected — notifications trigger on material upload, enrollments update on module publish, progress feeds into dashboard stats — fixing one thing kept breaking something else.
+
+Solve the test submission logic, and the trainee dashboard percentage stops recalculating. Fix the chapter delete cascade, and material ordering breaks. Fix the file URL for mobile, and the web watermark cache misses.
+
+The root cause was always the same: fixing a query or state update path without tracing all downstream consumers of that data.
+
+The fix was disciplined: after every change, run the full user flow. Login as trainee, check dashboard, open a module, open materials, take a test, check result, check profile stats. Tedious but non-negotiable.
+
+> 💡 **Simple version:** In a big app, everything connects to everything. Fixing one leak sometimes opens another one unexpectedly. The only real fix is testing the whole flow after every change, not just the specific thing you touched.
+
+---
+
+### Bug 2 — The File Serving Auth Problem
+When a trainee clicks 'Open PDF,' the frontend opens it in an iframe. The problem: a browser's iframe tag makes a plain HTTP GET request. It cannot attach an `Authorization: Bearer` header — that's only possible from JavaScript `fetch()` or Axios.
+
+The PDF endpoint returned a 401. The iframe showed nothing. No error in the console. The 401 was silently consumed by the browser — the hardest kind of bug to diagnose.
+
+The fix was a query-parameter token approach. The backend was updated to accept the JWT from either the `Authorization` header or a `?token=` query parameter:
+
+```python
+def _get_user_from_request(token, db):
+    if not token: return None
+    payload = decode_token(token)
+    if not payload: return None
+    return db.query(models.User).filter_by(
+        id=int(payload.get('sub', 0))
+    ).first()
+```
+
+> 💡 **Simple version:** Think of it like a bouncer checking ID. Your JavaScript can hand over its ID smoothly. But when a browser navigates directly to a URL — like showing a PDF in a frame — it can't carry any ID. So we put the ID in the URL itself. It's a known tradeoff, appropriate for an internal corporate system.
+
+---
+
+### Bug 3 — The Phase Logic Clock Mismatch
+The test phase logic had a subtle bug. Test availability checks (is this test window open?) were being done by comparing the test's `start_datetime` against the client's local JavaScript clock. The backend was doing the same comparison against its own clock.
+
+A trainee could see a 'Take Test' button on the frontend — client clock said it was open — but the backend would return a 403 because its clock said otherwise. The error message was opaque: 'Test window closed.'
+
+The fix was to include the server's current timestamp in the module API response and have the client use that for all time comparisons:
+
+```python
+return {
+    "module": ...,
+    "phase": phase,
+    "now_iso": datetime.now().isoformat(), # client uses this
+}
+```
+
+> 💡 **Simple version:** Your laptop's clock and the server's clock may differ. If test availability is based on a time comparison and both sides use different clocks, they'll disagree. Solution: always use the server's time for time-sensitive decisions.
+
+---
+
+### Bug 4 — The Silent `meet_link` Schema Gap
+Midway through the project, a new requirement came in: add training types (self-paced, virtual, classroom) and a `meet_link` field for virtual and classroom sessions. The modules table already existed, so I wrote a migration script to add the new columns.
+
+The bug: I forgot to update the Pydantic `ScheduleRequest` schema to include `meet_link`. The frontend was sending it. The backend received it but silently discarded it — not declared in the schema, not validated, not saved. No exception. No error. Just silent data loss.
+
+> 💡 **Simple version:** Always check that both sides of a data flow speak the same language. When you add a field to the database, also add it to the schema that receives the data, and the schema that returns it. One missed step and data disappears quietly.
+
+---
+
+### Bug 5 — React Native File Upload on Android
+The mobile app's material upload feature uses `expo-document-picker`. On iOS, the picked file's URI works as-is. On Android, the URI is a content URI (`content://...`) that can't be read by a plain HTTP request.
+
+The Axios multipart upload was failing silently on Android — no useful error, just no file arriving at the server.
+
+The fix was ensuring the `FormData` object was constructed with the exact shape React Native's `XMLHttpRequest` implementation expects:
+
+```javascript
+formData.append('file', {
+  uri: uploadForm.file.uri,   // content:// URI on Android
+  name: uploadForm.file.name,
+  type: uploadForm.file.mimeType || 'application/octet-stream',
+});
+```
+
+> 💡 **Simple version:** iOS and Android handle file paths differently. Android uses a special reference code for files instead of a simple path. React Native knows how to send this code to a server — but only if you tell it the exact format. Missing the type field causes silent failure.
+
+---
+
+## 7. The Meeting That Mattered Most
+
+Meeting seven was the longest of the project. Mr. Shashikant Sir — a senior technical person from Eagle — watched a live demo. The app crashed again during it.
+
+Both sirs were completely calm. Shashikant Sir said something I won't forget: *"We've all come through this way."*
+
+He then spent an extended session explaining how Eagle's operations actually work — the training schedules for guards spread across client sites, the difficulty of tracking who completed what, how a new system plugs into their workflow. He explained the gaps our LMS was built to fill and what improvements would make it production-ready.
+
+At the end of the meeting, he asked me to push the code to GitHub and make him a contributor. He would review the code and send detailed feedback.
+
+Current status: the portal is ready for testing. Code review is in progress.
+
+> 💡 **Simple version:** A crash in a demo is not a failure — it's data. What matters is the response. Staying calm, understanding what failed, fixing it, and coming back better is what professionals do. This was perhaps the most important lesson of the project.
+
+---
+
+## 8. What I'd Do Differently
+
+1. **Start with API versioning (`/api/v1/...`):** When the mobile app needed slightly different response shapes, I had to add conditional logic inside existing endpoints. Versioned routes from day one would have kept this clean.
+2. **Use Alembic for migrations instead of raw `ALTER TABLE` scripts:** The `migrate.py` approach works but is fragile. Alembic gives you versioned, reversible migrations tracked in git alongside the code.
+3. **Abstract the phase logic into one shared utility:** The `_get_phase()` function exists in two different routers with slightly different implementations. Two versions of the same logic means two places to fix when requirements change.
+4. **Test on real devices earlier:** Both demo crashes happened because emulator testing was thorough but real-device testing under real network conditions started too late. It should start at the same time as feature development.
+5. **Keep a bug log during development:** A simple markdown file tracking 'what I changed and what it affected' would have made the cascading bug problem far easier to diagnose.
+
+---
+
+## 9. Key Takeaways
+
+Working on this project across seven meetings and several months taught me things that no classroom session delivers.
+
+- **Requirements documentation is an engineering skill:** The reason meeting one went well is that I treated note-taking as seriously as coding. Every detail Mr. Godse explained was written down precisely. That document became the spec. The spec became the schema. The schema became the code. The schema I designed in meeting one survived all seven meetings with only two added columns.
+- **Big applications break at integration points, not in isolation:** Individual features worked perfectly in development. Things broke when they interacted with each other under real usage. Integration testing is not optional, and you need to run full user flows regularly — not just unit test individual functions.
+- **Industry experience is irreplaceable:** When Shashikant Sir walked through the codebase and explained how their operations actually work, it reframed the entire project. You can build a technically correct system and still miss the point if you don't understand the domain it's serving. That extended session was worth more than any tutorial.
+- **Calm in a crisis is a professional skill:** The app crashed twice in front of industry professionals. Both times, what mattered was the response — understanding the failure, fixing it, and coming back better. That's the standard.
+
+---
+
+## 10. Resources & References
+
+- **FastAPI documentation:** `fastapi.tiangolo.com`
+- **SQLAlchemy ORM:** `docs.sqlalchemy.org`
+- **React Router v6:** `reactrouter.com`
+- **Expo React Native:** `docs.expo.dev`
+- **pypdf (PDF manipulation):** `pypdf.readthedocs.io`
+- **Pillow (image processing):** `pillow.readthedocs.io`
+- **python-jose (JWT):** `python-jose.readthedocs.io`
+
+*Eagle LMS is an ongoing industry-sponsored project by a team of five students, under the guidance of Mrs. Pallavi Malji Khalde. The project is currently in the testing and code review phase with Eagle Industrial Services Pvt. Ltd.*
+"""
+        existing_lms = db.query(Post).filter(Post.slug == lms_slug).first()
+        if not existing_lms:
+            lms_post = Post(
+                title="Building Eagle LMS: How I Led a Full-Stack Industry-Sponsored Project from Napkin to Production",
+                slug=lms_slug,
+                excerpt="The authentic story of leading a team of 5 to build Eagle LMS for Eagle Industrial Services — dual-role web & React Native mobile app, dynamic watermarking, phase-based unlocking, and surviving 7 industry review meetings.",
+                content=lms_content,
+                content_type="BUILD",
+                category="DevOps",
+                reading_time="25 min read",
+                status="PUBLISHED",
+                featured=True,
+                published_at="2026-04-18",
+                github_repo="shlokbam/lms"
+            )
+            db.add(lms_post)
+        else:
+            existing_lms.title = "Building Eagle LMS: How I Led a Full-Stack Industry-Sponsored Project from Napkin to Production"
+            existing_lms.excerpt = "The authentic story of leading a team of 5 to build Eagle LMS for Eagle Industrial Services — dual-role web & React Native mobile app, dynamic watermarking, phase-based unlocking, and surviving 7 industry review meetings."
+            existing_lms.content = lms_content
+            existing_lms.reading_time = "25 min read"
+            existing_lms.published_at = "2026-04-18"
+
         db.commit()
 
     finally:
