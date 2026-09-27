@@ -261,6 +261,33 @@ export function ArticleDetail() {
             </div>
           </aside>
         </div>
+
+        {/* Bottom Article Actions & Go To Top Button */}
+        <div className="pt-12 mt-12 border-t border-[#1D222B] flex flex-wrap items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <Link
+              to="/journal"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#11141A] border border-[#1D222B] text-xs font-mono text-[#9CA3AF] hover:text-[#F5F7FA] hover:border-[#6C8CFF]/40 transition-all"
+            >
+              <ArrowLeft className="w-4 h-4 text-[#6C8CFF]" /> BACK TO JOURNAL
+            </Link>
+            <button
+              onClick={handleCopyLink}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#11141A] border border-[#1D222B] text-xs font-mono text-[#9CA3AF] hover:text-[#F5F7FA] hover:border-[#6C8CFF]/40 transition-all"
+            >
+              {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Share2 className="w-4 h-4 text-[#6C8CFF]" />}
+              <span>{copied ? 'LINK COPIED' : 'SHARE ARTICLE'}</span>
+            </button>
+          </div>
+
+          <button
+            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#6C8CFF]/10 border border-[#6C8CFF]/40 text-xs font-mono font-bold text-[#6C8CFF] hover:bg-[#6C8CFF] hover:text-[#08090B] shadow-[0_0_20px_rgba(108,140,255,0.25)] transition-all duration-200 group"
+          >
+            <ArrowUp className="w-4 h-4 transition-transform group-hover:-translate-y-1" />
+            <span>GO TO TOP</span>
+          </button>
+        </div>
       </article>
     </>
   );
