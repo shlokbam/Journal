@@ -44,7 +44,7 @@ export function Navbar() {
             : 'bg-[#08090B] border-transparent'
         }`}
       >
-        <div className="max-w-[1440px] mx-auto px-4 sm:px-8 lg:px-12 h-16 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-6 sm:px-10 lg:px-16 h-16 flex items-center justify-between">
           {/* Brand Identity */}
           <Link to="/" className="flex items-center gap-2.5 group">
             <div className="w-8 h-8 rounded-lg bg-[#11141A] border border-[#1D222B] flex items-center justify-center text-[#6C8CFF] group-hover:border-[#6C8CFF]/50 transition-colors">

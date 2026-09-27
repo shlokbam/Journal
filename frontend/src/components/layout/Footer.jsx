@@ -6,7 +6,7 @@ import { Github, Linkedin } from '../ui/Icons';
 export function Footer() {
   return (
     <footer className="w-full bg-[#08090B] border-t border-[#1D222B] mt-8 sm:mt-12 py-10 text-sm text-[#9CA3AF]">
-      <div className="max-w-[1440px] mx-auto px-4 sm:px-8 lg:px-12">
+      <div className="max-w-7xl mx-auto px-6 sm:px-10 lg:px-16">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-8 pb-8 border-b border-[#1D222B]">
           <div>
             <Link to="/" className="flex items-center gap-2 mb-2">
