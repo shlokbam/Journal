@@ -17,7 +17,7 @@ export function Experiments() {
   return (
     <div className="space-y-12">
       {/* Page Header */}
-      <div className="space-y-4 max-w-3xl">
+      <div className="space-y-4 max-w-5xl">
         <span className="text-xs font-mono text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
           <FlaskConical className="w-4 h-4" /> LAB NOTEBOOK & RESEARCH
         </span>
@@ -34,7 +34,7 @@ export function Experiments() {
         <div className="py-20 text-center font-mono text-sm text-[#6B7280]">
           Loading experiments...
         </div>
-      ) : (
+      ) : experiments.length > 0 ? (
         <div className="space-y-8">
           {experiments.map((exp) => (
             <div
@@ -58,7 +58,7 @@ export function Experiments() {
                 </div>
 
                 <div className="flex flex-wrap gap-1.5">
-                  {exp.tags.map((tag) => (
+                  {(exp.tags || []).map((tag) => (
                     <TechTag key={tag}>{tag}</TechTag>
                   ))}
                 </div>
@@ -80,7 +80,7 @@ export function Experiments() {
                   <CheckCircle2 className="w-3.5 h-3.5" /> KEY FINDINGS & OBSERVED BEHAVIOR
                 </h3>
                 <ul className="space-y-2 text-xs font-mono text-[#D1D5DB]">
-                  {exp.findings.map((f, i) => (
+                  {(exp.findings || []).map((f, i) => (
                     <li key={i} className="flex items-start gap-2">
                       <span className="text-[#6C8CFF] shrink-0">→</span>
                       <span>{f}</span>
@@ -95,7 +95,7 @@ export function Experiments() {
                   <BarChart2 className="w-3.5 h-3.5" /> BENCHMARK METRICS
                 </h3>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {Object.entries(exp.metrics).map(([key, value]) => (
+                  {Object.entries(exp.metrics || {}).map(([key, value]) => (
                     <div
                       key={key}
                       className="p-3 rounded-lg bg-[#08090B] border border-[#1D222B] text-center"
@@ -112,6 +112,14 @@ export function Experiments() {
               </div>
             </div>
           ))}
+        </div>
+      ) : (
+        <div className="p-12 rounded-xl bg-[#0D1117] border border-[#1D222B] text-center space-y-3">
+          <FlaskConical className="w-8 h-8 text-[#6B7280] mx-auto" />
+          <h2 className="text-lg font-mono font-bold text-[#F5F7FA]">NO EXPERIMENTS LOGGED</h2>
+          <p className="text-sm text-[#9CA3AF] max-w-md mx-auto">
+            Laboratory benchmarks, latency investigations, and empirical model tests will be published here as they are conducted.
+          </p>
         </div>
       )}
     </div>

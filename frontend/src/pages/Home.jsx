@@ -137,47 +137,45 @@ export function Home() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {recentExperiments.map((exp) => (
-            <div
-              key={exp.id}
-              className="p-6 rounded-xl bg-[#0D1117] border border-[#1D222B] space-y-4 hover:border-[#2E3646] transition-colors"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono text-amber-400 bg-amber-950/50 px-2 py-0.5 rounded border border-amber-800/40 flex items-center gap-1">
-                  <FlaskConical className="w-3 h-3" /> EXPERIMENT
-                </span>
-                <span className="text-xs font-mono text-[#6B7280]">{exp.date}</span>
+          {recentExperiments.length > 0 ? (
+            recentExperiments.map((exp) => (
+              <div
+                key={exp.id}
+                className="p-6 rounded-xl bg-[#0D1117] border border-[#1D222B] space-y-4 hover:border-[#2E3646] transition-colors"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-mono text-amber-400 bg-amber-950/50 px-2 py-0.5 rounded border border-amber-800/40 flex items-center gap-1">
+                    <FlaskConical className="w-3 h-3" /> EXPERIMENT
+                  </span>
+                  <span className="text-xs font-mono text-[#6B7280]">{exp.date}</span>
+                </div>
+
+                <h3 className="text-xl font-bold text-[#F5F7FA]">
+                  {exp.title}
+                </h3>
+
+                <p className="text-sm text-[#9CA3AF] leading-relaxed">
+                  {exp.summary}
+                </p>
+
+                {/* Metrics Pills */}
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-[#1D222B]/60 font-mono text-xs">
+                  {Object.entries(exp.metrics || {}).slice(0, 2).map(([key, val]) => (
+                    <div key={key} className="p-2 rounded bg-[#11141A] border border-[#1D222B]">
+                      <div className="text-[10px] text-[#6B7280] uppercase">{key}</div>
+                      <div className="text-[#F5F7FA] font-bold mt-0.5">{val}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
-
-              <h3 className="text-xl font-bold text-[#F5F7FA]">
-                {exp.title}
-              </h3>
-
-              <p className="text-sm text-[#9CA3AF] leading-relaxed">
-                {exp.summary}
-              </p>
-
-              {/* Metrics Pills */}
-              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-[#1D222B]/60 font-mono text-xs">
-                {Object.entries(exp.metrics).slice(0, 2).map(([key, val]) => (
-                  <div key={key} className="p-2 rounded bg-[#11141A] border border-[#1D222B]">
-                    <div className="text-[10px] text-[#6B7280] uppercase">{key}</div>
-                    <div className="text-[#F5F7FA] font-bold mt-0.5">{val}</div>
-                  </div>
-                ))}
-              </div>
+            ))
+          ) : (
+            <div className="md:col-span-2 p-8 rounded-xl bg-[#0D1117] border border-[#1D222B] text-center space-y-2">
+              <FlaskConical className="w-6 h-6 text-[#6B7280] mx-auto" />
+              <p className="text-sm font-mono text-[#9CA3AF]">No active experiments published yet.</p>
+              <p className="text-xs text-[#6B7280]">New empirical benchmarks and model investigations will be published here.</p>
             </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Editorial Footer Tagline */}
-      <section className="py-12 text-center space-y-3 border-t border-[#1D222B]">
-        <div className="text-xs font-mono text-[#6B7280] uppercase tracking-widest">
-          BUILD · THINK · EXPLORE
-        </div>
-        <div className="font-mono text-xl font-bold text-[#F5F7FA]">
-          SHLOK.BAM
+          )}
         </div>
       </section>
     </div>

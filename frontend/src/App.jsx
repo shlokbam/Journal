@@ -24,7 +24,7 @@ export default function App() {
       <div className="min-h-screen bg-[#08090B] text-[#F5F7FA] font-sans antialiased selection:bg-[#6C8CFF]/30 selection:text-white flex flex-col justify-between">
         <div>
           <Navbar />
-          <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 sm:pt-12 pb-16">
+          <main className="max-w-[1440px] mx-auto px-4 sm:px-8 lg:px-12 pt-8 sm:pt-12 pb-8">
             <Routes>
               {/* Journal & Lab Routes */}
               <Route path="/" element={<Home />} />

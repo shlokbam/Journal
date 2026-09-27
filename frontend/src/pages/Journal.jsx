@@ -54,7 +54,7 @@ export function Journal() {
   return (
     <div className="space-y-12">
       {/* Page Header */}
-      <div className="space-y-4 max-w-3xl">
+      <div className="space-y-4 max-w-5xl">
         <span className="text-xs font-mono text-[#6C8CFF] uppercase tracking-wider block">
           ENGINEERING ARCHIVE
         </span>

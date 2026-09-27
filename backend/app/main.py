@@ -1941,20 +1941,6 @@ const lowestArea = Math.min(avgAnswer / 40, avgConfidence / 30, avgGaze / 30) ==
 
         db.commit()
 
-        # Seed sample experiments if empty
-        if db.query(Experiment).count() == 0:
-            exp1 = Experiment(
-                title="Quantization vs. Latency: Llama 3.3 70B Benchmark",
-                slug="quantization-vs-latency-llama-3-3",
-                date="2026-09-15",
-                status="Completed",
-                summary="Evaluating token generation speed, VRAM memory footprint, and perplexity across GGUF and AWQ quantizations on an RTX 4090.",
-                findings=json.dumps(["Q4_K_M delivers 3.2x faster generation.", "VRAM footprint dropped to 42GB."]),
-                metrics=json.dumps({"Q4_K_M Speed": "48 tok/s", "Perplexity Delta": "+0.08"})
-            )
-            db.add(exp1)
-            db.commit()
-
     finally:
         db.close()
 

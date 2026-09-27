@@ -67,7 +67,7 @@ export function ArticleDetail() {
   }
 
   return (
-    <article className="space-y-12 max-w-5xl mx-auto">
+    <article className="space-y-12 w-full">
       {/* Back Link */}
       <div>
         <Link

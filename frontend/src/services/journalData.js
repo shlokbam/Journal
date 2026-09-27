@@ -1897,66 +1897,7 @@ const lowestArea = Math.min(avgAnswer / 40, avgConfidence / 30, avgGaze / 30) ==
   }
 ];
 
-export const EXPERIMENTS_DATA = [
-  {
-    id: 1,
-    title: "Quantization vs. Latency: Llama 3.3 70B Benchmark",
-    slug: "quantization-vs-latency-llama-3-3",
-    date: "2026-09-15",
-    tags: ["LLM", "Quantization", "vLLM", "GPU"],
-    status: "Completed",
-    summary: "Evaluating token generation speed, VRAM memory footprint, and perplexity across GGUF (Q4_K_M vs Q8_0) and AWQ 4-bit quantizations on an RTX 4090.",
-    findings: [
-      "Q4_K_M delivers 3.2x faster generation with only 0.8% perplexity degradation over FP16.",
-      "VRAM footprint dropped from 140GB (unquantized) to 42GB for 70B models.",
-      "vLLM engine with PagedAttention achieved 48 tokens/sec throughput."
-    ],
-    metrics: {
-      "Q4_K_M Speed": "48 tok/s",
-      "Q8_0 Speed": "22 tok/s",
-      "VRAM Used": "42.4 GB",
-      "Perplexity Delta": "+0.08"
-    }
-  },
-  {
-    id: 2,
-    title: "Vector DB Performance: Qdrant vs. Pgvector at 5M Scale",
-    slug: "vector-db-performance-qdrant-vs-pgvector",
-    date: "2026-08-28",
-    tags: ["Vector Search", "PostgreSQL", "Qdrant", "Database"],
-    status: "Completed",
-    summary: "Stress-testing HNSW index retrieval times, memory consumption, and p99 query latency across 5,000,000 1536-dimensional embeddings.",
-    findings: [
-      "Qdrant maintained p99 latency of 14ms with in-memory HNSW index.",
-      "Pgvector with HNSW index reached p99 of 28ms while sharing PostgreSQL connection pool.",
-      "For unified relational + vector queries, Pgvector simplified architecture with minimal latency trade-off."
-    ],
-    metrics: {
-      "Qdrant p99": "14.2 ms",
-      "Pgvector p99": "28.4 ms",
-      "Dataset Size": "5,000,000",
-      "Memory Usage": "18.2 GB"
-    }
-  },
-  {
-    id: 3,
-    title: "AST-Guided Prompting for Error-Free Code Synthesis",
-    slug: "ast-guided-prompting-for-code-synthesis",
-    date: "2026-08-05",
-    tags: ["Agents", "AST", "Python", "Prompting"],
-    status: "In Progress",
-    summary: "Testing iterative feedback loops where LLM code generation is passed into Python's ast module and ruff linter before returning final output.",
-    findings: [
-      "Reduced syntax runtime errors from 18% down to 0.4%.",
-      "Average validation loop takes 1.2 extra cycles when syntax errors occur."
-    ],
-    metrics: {
-      "Syntax Accuracy": "99.6%",
-      "Avg Retry Loops": "0.14",
-      "Lint Errors Blocked": "340/350"
-    }
-  }
-];
+export const EXPERIMENTS_DATA = [];
 
 export const PROFILE_DATA = {
   name: "Shlok Bam",
