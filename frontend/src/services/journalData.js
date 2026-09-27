@@ -61,7 +61,7 @@ export const PROFILE_DATA = {
   name: "Shlok Bam",
   handle: "shlokbam",
   title: "Information Technology Student & System Builder",
-  bio: "Third-Year IT Student at VIT Pune (9.01 CGPA). Building Agentic AI pipelines, multi-stage orchestration systems, scalable full-stack applications, and DevOps containerized infrastructure.",
+  bio: "Fourth-Year IT Student at VIT Pune (9.01 CGPA). Building Agentic AI pipelines, multi-stage orchestration systems, scalable full-stack applications, and DevOps containerized infrastructure.",
   status: "Currently building AI systems & developer tools",
   portfolio_url: "https://portfolio-edaa.onrender.com/",
   github: "https://github.com/shlokbam",

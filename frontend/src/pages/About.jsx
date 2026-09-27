@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Mail, Terminal, Cpu, Globe, ExternalLink } from 'lucide-react';
+import { Mail, Terminal, Cpu, Globe } from 'lucide-react';
 import { Github, Linkedin } from '../components/ui/Icons';
 import { profileApi } from '../services/api';
 import { TechTag } from '../components/ui/TechTag';
@@ -14,7 +14,7 @@ export function About() {
   if (!profile) return null;
 
   return (
-    <div className="space-y-12 max-w-4xl mx-auto">
+    <div className="space-y-12 w-full">
       {/* Header */}
       <div className="space-y-6 pb-8 border-b border-[#1D222B]">
         <span className="text-xs font-mono text-[#6C8CFF] uppercase tracking-wider block">
@@ -23,7 +23,7 @@ export function About() {
         <h1 className="text-4xl sm:text-6xl font-extrabold tracking-tight text-[#F5F7FA] leading-[1.1]">
           Building systems that turn complex problems into simple software.
         </h1>
-        <p className="text-lg text-[#9CA3AF] leading-relaxed max-w-2xl">
+        <p className="text-lg text-[#9CA3AF] leading-relaxed max-w-3xl">
           {profile.bio}
         </p>
 
@@ -60,27 +60,6 @@ export function About() {
             <Mail className="w-4 h-4" /> {profile.email}
           </a>
         </div>
-      </div>
-
-      {/* Redirect Portfolio Callout Banner */}
-      <div className="p-6 rounded-2xl bg-gradient-to-r from-[#0D1117] via-[#111622] to-[#0D1117] border border-[#6C8CFF]/30 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2 text-[#6C8CFF] font-mono text-xs font-semibold uppercase tracking-wider">
-            <Globe className="w-4 h-4" /> Comprehensive Showcase & Resume
-          </div>
-          <p className="text-sm text-[#9CA3AF]">
-            Looking for all 17+ projects, hackathon achievements, certifications, and academic records?
-          </p>
-        </div>
-        <a
-          href={profile.portfolio_url || "https://portfolio-edaa.onrender.com/"}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="px-5 py-2.5 rounded-lg bg-[#6C8CFF] hover:bg-[#8BA5FF] text-[#08090B] font-bold text-xs font-mono transition-all shadow-md flex items-center gap-2 whitespace-nowrap"
-        >
-          <span>Explore Complete Portfolio</span>
-          <ExternalLink className="w-3.5 h-3.5" />
-        </a>
       </div>
 
       {/* Current Focus */}
