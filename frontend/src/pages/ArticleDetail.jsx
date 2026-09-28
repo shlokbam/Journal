@@ -239,12 +239,12 @@ export function ArticleDetail() {
           </main>
 
           {/* Sticky Desktop TOC Sidebar */}
-          <aside className="hidden lg:block lg:col-span-4 space-y-8">
-            <div className="sticky top-24 p-6 rounded-xl bg-[#0D1117] border border-[#1D222B]">
+          <aside className="hidden lg:block lg:col-span-4 relative">
+            <div className="sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto p-6 rounded-xl bg-[#0D1117] border border-[#1D222B] shadow-2xl space-y-6">
               <TableOfContents headings={headings} />
 
               {post.github_repo && (
-                <div className="mt-8 pt-6 border-t border-[#1D222B]">
+                <div className="pt-4 border-t border-[#1D222B]">
                   <a
                     href={`https://github.com/${post.github_repo}`}
                     target="_blank"
