@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Search, SlidersHorizontal, FileText } from 'lucide-react';
+import { Search, SlidersHorizontal, FileText, LayoutGrid, List } from 'lucide-react';
 import { postsApi } from '../services/api';
 import { ArticleCard } from '../components/articles/ArticleCard';
 import { TechTag } from '../components/ui/TechTag';
@@ -14,6 +14,9 @@ export function Journal() {
   const activeType = searchParams.get('type') || 'ALL';
   const activeTag = searchParams.get('tag') || '';
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // Default to 'grid' view for square / box cards layout
+  const [viewMode, setViewMode] = useState('grid');
   
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -73,27 +76,58 @@ export function Journal() {
 
       {/* Filter Toolbar */}
       <div className="space-y-6 pt-4 border-t border-[#1D222B]">
-        {/* Content Type Tabs */}
-        <div className="flex flex-wrap items-center gap-2">
-          {CONTENT_TYPES.map((type) => {
-            const isActive = activeType === type;
-            return (
-              <button
-                key={type}
-                onClick={() => handleTypeSelect(type)}
-                className={`px-4 py-2 text-xs font-mono font-medium rounded-lg transition-all duration-150 ${
-                  isActive
-                    ? 'bg-[#6C8CFF] text-[#08090B] font-bold shadow-md shadow-[#6C8CFF]/20'
-                    : 'bg-[#11141A] text-[#9CA3AF] hover:text-[#F5F7FA] border border-[#1D222B] hover:border-[#2E3646]'
-                }`}
-              >
-                {type}
-              </button>
-            );
-          })}
+        {/* Content Type Tabs & View Switcher */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-2">
+            {CONTENT_TYPES.map((type) => {
+              const isActive = activeType === type;
+              return (
+                <button
+                  key={type}
+                  onClick={() => handleTypeSelect(type)}
+                  className={`px-4 py-2 text-xs font-mono font-medium rounded-lg transition-all duration-150 ${
+                    isActive
+                      ? 'bg-[#6C8CFF] text-[#08090B] font-bold shadow-md shadow-[#6C8CFF]/20'
+                      : 'bg-[#11141A] text-[#9CA3AF] hover:text-[#F5F7FA] border border-[#1D222B] hover:border-[#2E3646]'
+                  }`}
+                >
+                  {type}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Grid vs List View Mode Toggle */}
+          <div className="flex items-center gap-1 p-1 bg-[#11141A] border border-[#1D222B] rounded-lg shrink-0 self-start sm:self-auto">
+            <button
+              onClick={() => setViewMode('grid')}
+              title="Square Box Grid View"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-mono transition-all ${
+                viewMode === 'grid'
+                  ? 'bg-[#6C8CFF] text-[#08090B] font-bold shadow-sm'
+                  : 'text-[#9CA3AF] hover:text-[#F5F7FA]'
+              }`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span>Grid</span>
+            </button>
+
+            <button
+              onClick={() => setViewMode('list')}
+              title="List Rectangle View"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-mono transition-all ${
+                viewMode === 'list'
+                  ? 'bg-[#6C8CFF] text-[#08090B] font-bold shadow-sm'
+                  : 'text-[#9CA3AF] hover:text-[#F5F7FA]'
+              }`}
+            >
+              <List className="w-3.5 h-3.5" />
+              <span>List</span>
+            </button>
+          </div>
         </div>
 
-        {/* Search & Tags Row */}
+        {/* Search & Active Filters Row */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           {/* Search Box */}
           <div className="relative w-full md:w-80">
@@ -126,7 +160,7 @@ export function Journal() {
           )}
         </div>
 
-        {/* Tags cloud */}
+        {/* Tags Cloud */}
         {allTags.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5 pt-2">
             <span className="text-xs font-mono text-[#6B7280] mr-2">Tags:</span>
@@ -143,10 +177,10 @@ export function Journal() {
         )}
       </div>
 
-      {/* Articles List */}
-      <div className="space-y-4">
+      {/* Articles Container (Grid Boxes vs List Rectangles) */}
+      <div>
         {loading ? (
-          <NeuralSkeletonLoader count={3} message="DECODING NEURAL SIGNAL ARCHIVE..." />
+          <NeuralSkeletonLoader count={6} message="DECODING NEURAL SIGNAL ARCHIVE..." />
         ) : posts.length === 0 ? (
           <div className="py-20 text-center space-y-3 bg-[#0D1117] rounded-xl border border-[#1D222B] p-8">
             <FileText className="w-8 h-8 text-[#6B7280] mx-auto" />
@@ -155,10 +189,18 @@ export function Journal() {
               Try adjusting your search query or content type filter.
             </div>
           </div>
+        ) : viewMode === 'grid' ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {posts.map((post, idx) => (
+              <ArticleCard key={post.id} post={post} index={idx} variant="grid" />
+            ))}
+          </div>
         ) : (
-          posts.map((post, idx) => (
-            <ArticleCard key={post.id} post={post} index={idx} />
-          ))
+          <div className="space-y-4">
+            {posts.map((post, idx) => (
+              <ArticleCard key={post.id} post={post} index={idx} variant="list" />
+            ))}
+          </div>
         )}
       </div>
     </div>
