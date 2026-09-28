@@ -35,3075 +35,648 @@ def on_startup():
     # Initial Data Seeding
     db = SessionLocal()
     try:
-        
-        # Seed i-built-dailydiff-an-autonomous-multi-agent-tech-research-editorial-team
-        existing_5 = db.query(Post).filter(Post.slug == "i-built-dailydiff-an-autonomous-multi-agent-tech-research-editorial-team").first()
-        if not existing_5:
-            post_5 = Post(
-                title="I Built DailyDiff — An Autonomous Multi-Agent Tech Research & Editorial Team",
-                slug="i-built-dailydiff-an-autonomous-multi-agent-tech-research-editorial-team",
-                excerpt="How I engineered an autonomous 7-agent editorial system using LangGraph, FastAPI, and Brevo to filter technical noise from GitHub, arXiv, and Dev.to into sharp 5-point developer briefings.",
-                content="""![DailyDiff Hero Banner](hero-banner)
 
-# Before We Start — Why I Built This
-
-Every morning as a software developer, I faced the same routine: opening Hacker News, GitHub Trending, Dev.to, and Twitter, wading through hundreds of clickbait articles, 15-minute AI wrappers, and rehashed marketing posts just to find 2 or 3 genuine engineering updates.
-
-I wanted an automated system that operated under one strict philosophy: **"We scan the noise, five things survive."**
-
-So I built **DailyDiff** — an autonomous multi-agent tech research and editorial team powered by **LangGraph**, **FastAPI**, **Vite + React**, and **Brevo**. It runs on a scheduled cron workflow (Mon, Wed, Fri at 03:30 UTC), ingests raw signals from across the web, sanitizes and verifies technical claims, evaluates developer utility, compiles a sharp 5-item briefing, and emails it directly to subscribers.
-
-This post breaks down the entire system architecture, the 7-agent LangGraph workflow, multi-LLM resiliency, real engineering bugs, and how it was deployed live at `dailydiff.in`.
-
----
-
-## 1. System Architecture & The 7-Agent Graph
-
-DailyDiff is built as a Directed Acyclic Graph (DAG) using **LangGraph**. Unlike simple chain-of-thought prompts, LangGraph allows stateful agent nodes to read from and write to a shared thread state dictionary (`AgentState`).
-
-Here is the high-level system architecture:
-
-```text
-               ┌──────────────────────────────────────────┐
-               │    Scout Agent (Multi-Source Scraper)    │
-               │  Hacker News API • Dev.to • GitHub API   │
-               └────────────────────┬─────────────────────┘
-                                    │
-                                    ▼
-               ┌──────────────────────────────────────────┐
-               │  Skeptic Agent (Deduplication & Hype)    │
-               │  History JSON check + Zero-shot LLM filter│
-               └────────────────────┬─────────────────────┘
-                                    │
-                                    ▼
-               ┌──────────────────────────────────────────┐
-               │    Research Agent (DOM Crawler & Docs)   │
-               │  Fetches raw READMEs & release notes     │
-               └────────────────────┬─────────────────────┘
-                                    │
-                                    ▼
-               ┌──────────────────────────────────────────┐
-               │  Verifier Agent (Fact & Claim Checker)   │
-               │  Cross-checks assertions against source  │
-               └────────────────────┬─────────────────────┘
-                                    │
-                                    ▼
-               ┌──────────────────────────────────────────┐
-               │     Analyst Agent (Developer Utility)    │
-               │  Assigns: WATCH, INTEGRATE, or READ      │
-               └────────────────────┬─────────────────────┘
-                                    │
-                                    ▼
-               ┌──────────────────────────────────────────┐
-               │   Editor Agent (ELI5 & TL;DR Compiler)   │
-               │  Trims jargon & formats top 5 briefing   │
-               └────────────────────┬─────────────────────┘
-                                    │
-                                    ▼
-               ┌──────────────────────────────────────────┐
-               │    Publisher Agent (Archive & Dispatch)  │
-               │  Git CMS save + Brevo API email dispatch │
-               └──────────────────────────────────────────┘
-```
-
-### Tech Stack
-
-| Domain | Technology |
-| :--- | :--- |
-| **Agent Orchestration** | Python 3.12, LangGraph, LangChain |
-| **Primary AI Engine** | Mistral AI (`open-mixtral-8x22b` / `mistral-small-latest`) |
-| **Fail-safe AI Fallback** | Google Gemini (`gemini-3.5-flash`) |
-| **Web Service API** | FastAPI, Uvicorn, Pydantic |
-| **Database** | SQLite locally, Neon Cloud Postgres in production |
-| **Email Dispatcher** | Brevo REST API v3 (custom domain `briefs@dailydiff.in`) |
-| **Frontend Client** | Vite + React with custom glassmorphism design tokens |
-| **Automation** | GitHub Actions (`thrice_weekly_brief.yml` cron) |
-
----
-
-## 2. Deep Dive into Agent Specialization
-
-Each node in the LangGraph network operates with a single responsibility and clean input/output contracts.
-
-### Node 1 — Scout Agent (Multi-Source Ingestion)
-The Scout node pulls technical signals from three primary channels:
-1. **Hacker News**: Fetches the top 30 item IDs via Firebase REST API (`/v0/topstories.json`) and extracts titles, URLs, and score metadata.
-2. **Dev.to Feed**: Scrapes trending backend and system design RSS feeds.
-3. **GitHub Releases API**: Queries release tag metadata for major core frameworks (`react`, `next.js`, `fastapi`, `tailwindcss`, `django`, `go`).
-
-```python
-async def fetch_hn_top_stories(limit: int = 30) -> list[dict]:
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        res = await client.get("https://hacker-news.firebaseio.com/v0/topstories.json")
-        story_ids = res.json()[:limit]
-        tasks = [client.get(f"https://hacker-news.firebaseio.com/v0/item/{sid}.json") for sid in story_ids]
-        responses = await asyncio.gather(*tasks, return_exceptions=True)
-        return [r.json() for r in responses if hasattr(r, 'status_code') and r.status_code == 200]
-```
-
-### Node 2 — Skeptic Agent (Deduplication & Hype Filter)
-Raw scraped links contain massive duplicates and low-effort promotional posts. The Skeptic node runs a two-tier filtering strategy:
-- **Algorithmic Deduplication**: Normalizes URLs and checks against `data/history.json` (archived past briefings).
-- **Hype Filter**: Passes candidates through a zero-shot classification prompt to discard marketing fluff, non-technical opinion pieces, and speculative financial news.
-
-> 💡 **Simple Version:** The Scout agent gathers everything like a net thrown in the ocean. The Skeptic agent immediately throws back 80% of the catch — discarding duplicates, advertisements, and sensational clickbait before any heavy processing happens.
-
-### Node 3 & 4 — Research & Verifier Agents
-- **Research Agent**: Visits target URLs, strips boilerplate script/nav markup, and extracts the core technical content or README text.
-- **Verifier Agent**: Reads technical assertions (e.g. *"Reduces memory by 40%"* or *"Supports zero-copy deserialization"*) and cross-references them against raw release notes or benchmark documentation.
-
-### Node 5 & 6 — Analyst & Editor Agents
-- **Analyst Agent**: Evaluates direct utility for working software engineers, categorizing each item into an actionable verdict:
-  - `INTEGRATE`: Production-ready tool or critical security update.
-  - `WATCH`: Promising technology worth tracking.
-  - `READ`: Foundational architecture paper or engineering postmortem.
-- **Editor Agent**: Enforces **ELI5** (Explain Like I'm 5) readability standards, limits output to a maximum of $\le 5$ curated items, and prepends a bold 1-sentence **TL;DR** summary.
-
----
-
-## 3. Resiliency Engineering: The Multi-LLM Fallback Engine
-
-Relying on a single LLM API provider in an automated cron environment is risky due to rate limits (`HTTP 429`), temporary server outages (`HTTP 500/503`), or context window timeouts.
-
-To guarantee 99.9% pipeline execution success, I built a custom **`MistralToGeminiFallback`** wrapper class:
-
-```python
-class MistralToGeminiFallback:
-    def __init__(self, primary_client, fallback_client):
-        self.primary = primary_client
-        self.fallback = fallback_client
-
-    async def generate(self, prompt: str, system_prompt: str) -> str:
-        try:
-            # Primary execution via Mistral AI
-            response = await self.primary.ainvoke([
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=prompt)
-            ])
-            return response.content
-        except Exception as err:
-            logger.warning(f"[FAILOVER] Mistral API failed ({err}). Rerouting request to Gemini Flash...")
-            # Automatic failover to Google Gemini
-            response = await self.fallback.ainvoke([
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=prompt)
-            ])
-            return response.content
-```
-
-> 💡 **Simple Version:** Imagine hiring a primary editor (Mistral). If Mistral gets stuck in traffic or doesn't pick up the phone, the system instantly hands the draft to a back-up editor (Gemini) without crashing the pipeline.
-
----
-
-## 4. Real Engineering Bugs & Hard Lessons
-
-Building an autonomous editorial pipeline triggered several subtle production bugs:
-
-### Bug 1 — Silent Webhook Failures from GitHub Actions
-- **Symptom**: The GitHub Actions runner completed with exit code 0, but no emails were dispatched to subscribers.
-- **Root Cause**: The runner sent a HTTP POST request to Render backend `/api/notify-subscribers`, but because the endpoint lacked proper header authentication, Render quietly returned `401 Unauthorized`. GitHub Actions curl ignored the 401 response status code because `--fail` flag wasn't set.
-- **Fix**: Added a custom secret header `X-Auth-Token: <NOTIFY_SECRET_TOKEN>` verified by FastAPI security dependencies, and added `-f` (`--fail`) to the curl command in `.github/workflows/thrice_weekly_brief.yml`.
-
-### Bug 2 — Brevo vs Gmail SMTP TLS Handshake Timeout
-- **Symptom**: Local email dispatch worked via Gmail SMTP (`smtp.gmail.com:587`), but failed on Render production servers with `socket.timeout`.
-- **Root Cause**: Render free-tier instances block outbound SMTP port 587 to prevent spam abuse.
-- **Fix**: Switched email dispatching from raw SMTP sockets to **Brevo v3 REST API over HTTP/443** using `httpx.AsyncClient`. HTTP requests pass cleanly through cloud firewalls without socket blocks.
-
-### Bug 3 — Deduplication State Explosion
-- **Symptom**: The same Hacker News discussion was included twice in consecutive briefings if shared via different URLs (e.g. `https://news.ycombinator.com/item?id=12345` vs `https://example.com/blog?utm_source=hn`).
-- **Root Cause**: String equality check on raw URLs failed due to tracking parameters.
-- **Fix**: Built a URL canonicalization utility that strips tracking parameters (`utm_*`, `ref`, `source`) and normalizes domain names before hashing.
-
----
-
-## 5. Summary of Bugs & Resolutions
-
-| Problem | Root Cause | Engineering Solution |
-| :--- | :--- | :--- |
-| **Silent GHA webhook failure** | 401 response swallowed by curl | Added `X-Auth-Token` validation + `curl -f` fail-on-error flag |
-| **Render SMTP timeout** | Port 587 blocked on cloud provider | Replaced raw SMTP with Brevo HTTP REST API v3 |
-| **Duplicate article inclusions** | Tracking parameters in URLs (`utm_source`) | Canonicalized URLs and normalized domain hashes |
-| **LangGraph concurrent state overwrite** | Parallel nodes mutating list state | Used `Annotated[list, operator.add]` operator reducers |
-
----
-
-## 6. What I'd Do Differently & Key Takeaways
-
-1. **Implement RAG for Past Briefings**: Allow subscribers to ask questions across all past briefing archives using vector embeddings.
-2. **Dynamic Topic Personalization**: Let users select tags (`AI`, `DevOps`, `Frontend`, `Rust`) to receive customized briefing variants.
-3. **Automated E2E Testing**: Add mock HTTP fixtures for Hacker News and GitHub APIs in pytest to test pipeline runs without burning LLM API tokens.
-
-### Key Takeaways
-- **Multi-agent state machine design**: Breaking complex tasks into discrete agents with strict Pydantic inputs/outputs is infinitely easier to debug than single long prompts.
-- **LLM failover wrappers are essential**: Production AI workflows must handle 429/500 errors gracefully with automated fallback providers.
-- **Always verify HTTP status codes in CRON jobs**: Never assume a curl command succeeded just because the container didn't crash.
-
----
-
-## 7. Resources & Links
-
-- **Live Briefing Dashboard**: [https://dailydiff.in](https://dailydiff.in)
-- **GitHub Repository**: [github.com/shlokbam/DailyDiff](https://github.com/shlokbam/DailyDiff)
-- **LangGraph Documentation**: [langchain-ai.github.io/langgraph](https://langchain-ai.github.io/langgraph/)
-- **Brevo API v3 Specs**: [developers.brevo.com](https://developers.brevo.com/)
-""",
-                content_type="BUILD",
-                category="DevOps",
-                status="PUBLISHED",
-                reading_time="18 min read",
-                featured=True,
-                cover_image="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop",
-                author="Shlok Bam",
-                project_slug=None,
-                github_repo="shlokbam/DailyDiff",
-                published_at="2026-06-12"
-            )
-            for t_name in ["AI", "LangGraph", "FastAPI", "Python", "React"]:
-                tag = db.query(Tag).filter(Tag.name == t_name).first()
-                if not tag:
-                    tag = Tag(name=t_name, slug=t_name.lower().replace(" ", "-"))
-                    db.add(tag)
-                post_5.tags.append(tag)
-            db.add(post_5)
+        # Seed i-built-a-full-devops-ci-cd-pipeline-from-scratch-here-s-everything-that-went-wrong
+        existing_1 = db.query(Post).filter(Post.slug == "i-built-a-full-devops-ci-cd-pipeline-from-scratch-here-s-everything-that-went-wrong").first()
+        if not existing_1:
+        tags_1 = []
+        t_ai = db.query(Tag).filter(Tag.name == "AI").first()
+        if not t_ai:
+            t_ai = Tag(name="AI", slug="ai")
+            db.add(t_ai)
             db.commit()
-
-        # Seed building-an-autonomous-multi-agent-ai-research-fact-auditing-system-with-langchain-mistral-and-rag
-        existing_6 = db.query(Post).filter(Post.slug == "building-an-autonomous-multi-agent-ai-research-fact-auditing-system-with-langchain-mistral-and-rag").first()
-        if not existing_6:
-            post_6 = Post(
-                title="Building an Autonomous Multi-Agent AI Research & Fact-Auditing System with LangChain, Mistral, and RAG",
-                slug="building-an-autonomous-multi-agent-ai-research-fact-auditing-system-with-langchain-mistral-and-rag",
-                excerpt="A deep breakdown of constructing an asynchronous multi-agent research pipeline that crawls the web, sanitizes DOMs, drafts comprehensive technical reports, audits facts, and indexes vectors into Pinecone & ChromaDB.",
-                content="""![Multi-Agent Research Hero Banner](hero-banner)
-
-# Before We Start — Why Single-Prompt LLMs Fail at Deep Research
-
-Ask ChatGPT or any standard LLM to write a comprehensive technical research report on a complex topic like *"Advances in Fusion Reactor Core Containment"*.
-
-You will usually get a generic 5-paragraph summary. It will sound confident, but it will lack recent domain citations, suffer from knowledge cutoff gaps, miss critical technical nuances, and occasionally hallucinate plausible-sounding statistics.
-
-Single-prompt LLMs fail at deep research for three fundamental reasons:
-1. **No Real-Time Web Exploration**: They rely on static weights or basic un-sanitized web search snippets.
-2. **No Factual Auditing Loop**: They lack a secondary agent to critique, verify, and score the output.
-3. **Token Context Bloat**: Raw HTML pages clutter context windows with JavaScript scripts, CSS, and navigation headers.
-
-To solve this, I built the **Multi-Agent AI Research & Fact-Auditing System** — an asynchronous multi-agent pipeline built on **LangChain**, **FastAPI**, **Mistral AI**, **Tavily**, **BeautifulSoup**, and **Pinecone / ChromaDB**.
-
-This post breaks down the full architectural flow, real-time SSE streaming telemetry, RAG vector indexing, and key debugging insights.
-
----
-
-## 1. Multi-Agent Architecture Overview
-
-The system operates as an asynchronous pipeline governed by five specialized roles:
-
-```text
-┌────────────────────────────────────────────────────────────────────────┐
-│                        User Input (Research Topic)                     │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│  Search Agent (Tavily Parallel Indexer)                                │
-│  Discovers top 5 high-authority domain URLs and content snippets      │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│  Reader Agent (DOM Sanitizer & Web Scraper)                            │
-│  Strips script/style/nav tags, normalizes text (max 3,000 chars)       │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│  Writer Specialist (Synthesis Engine)                                  │
-│  Drafts multi-section markdown paper with citation anchors             │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│  Review Critic (Quality & Fact Auditor)                                │
-│  Evaluates academic score (X/10), strengths, & areas to improve        │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│  RAG Knowledge Ingestion Pipeline                                      │
-│  RecursiveCharacterTextSplitter ➔ Mistral Embeddings ➔ Pinecone/Chroma │
-└────────────────────────────────────────────────────────────────────────┘
-```
-
-### Tech Stack
-
-| Component | Technology |
-| :--- | :--- |
-| **Agent Framework** | Python 3.13, LangChain |
-| **LLM Provider** | Mistral AI (`open-mixtral-8x22b`) |
-| **Search Engine API** | Tavily Search Client |
-| **HTML Sanitizer** | BeautifulSoup4 (`bs4`) |
-| **Vector DB (RAG)** | Pinecone Cloud (Primary) / ChromaDB (Local fallback) |
-| **Embeddings** | `MistralAIEmbeddings` (`mistral-embed`) |
-| **Streaming API** | FastAPI ASGI Server with Server-Sent Events (SSE) |
-
----
-
-## 2. Technical Implementation & Agent Specialization
-
-### Agent 1 — Search Agent (Tavily Parallel Indexer)
-The Search Agent uses Tavily API to execute deep domain queries. Instead of grabbing raw HTML for 50 pages, it retrieves top 5 targeted results with clean 300-character normalized snippets.
-
-```python
-@tool
-def web_search(query: str) -> str:
-    """Search the web for recent and reliable technical information on a topic."""
-    tavily = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
-    response = tavily.search(query=query, max_results=5, search_depth="advanced")
-    
-    results = []
-    for item in response.get("results", []):
-        results.append(f"Title: {item['title']}\nURL: {item['url']}\nSnippet: {item['content']}\n")
-    return "\n---\n".join(results)
-```
-
-### Agent 2 — Reader Agent (DOM Sanitization & Scraping)
-When given a target URL, raw scraping often yields 100KB+ of inline JavaScript, CSS styles, and navigation menus. The Reader Agent uses `BeautifulSoup` with explicit tag decomposition and strict timeout controls:
-
-```python
-@tool
-def scrape_url(url: str) -> str:
-    """Scrape and return clean text content from a given URL."""
-    headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"}
-    try:
-        res = requests.get(url, headers=headers, timeout=8)
-        soup = BeautifulSoup(res.text, "html.parser")
-        
-        # Decompose non-content nodes
-        for element in soup(["script", "style", "nav", "footer", "header", "form"]):
-            element.decompose()
-            
-        text = soup.get_text(separator=" ")
-        clean_text = " ".join(text.split())
-        return clean_text[:3000] # Cap text payload to avoid context bloat
-    except Exception as e:
-        return f"Error scraping URL: {str(e)}"
-```
-
-> 💡 **Simple Version:** If a website is a messy newspaper filled with ads, popups, and nav bars, the Reader agent cuts out only the core news article paragraph text and discards all the surrounding clutter.
-
-### Agent 3 — Review Critic (Quality & Fact Auditor)
-The Review Critic acts as an un-biased peer reviewer. It evaluates the draft report against strict qualitative standards and outputs structured feedback:
-
-```text
-Score: 8.5/10
-
-Strengths:
-- Clear separation between Tokamak core containment and Stellarator magnet design.
-- Accurate citations of recent 2025 ignition benchmarks.
-
-Areas to Improve:
-- Provide more details on tritium breeding blanket material degradation.
-
-One line verdict:
-An exceptionally detailed and well-supported technical summary ready for publication.
-```
-
----
-
-## 3. Vector Storage & RAG Ingestion Pipeline
-
-Once the final report is audited, the pipeline automatically ingests it into a RAG (Retrieval-Augmented Generation) knowledge base for future querying.
-
-```python
-def ingest_report_to_vectorstore(topic: str, report_text: str):
-    # 1. Text Chunking
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200,
-        separators=["
-
-", "
-", " ", ""]
-    )
-    docs = text_splitter.create_documents(
-        texts=[report_text],
-        metadatas=[{"topic": topic, "timestamp": datetime.utcnow().isoformat()}]
-    )
-    
-    # 2. Embedding Generation & Vector Store Indexing
-    embeddings = MistralAIEmbeddings(model="mistral-embed")
-    
-    if os.getenv("PINECONE_API_KEY"):
-        # Index to Pinecone Cloud
-        vectorstore = PineconeVectorStore.from_documents(
-            documents=docs,
-            embedding=embeddings,
-            index_name=os.getenv("PINECONE_INDEX_NAME")
-        )
-    else:
-        # Fallback to local ChromaDB
-        vectorstore = Chroma.from_documents(
-            documents=docs,
-            embedding=embeddings,
-            persist_directory="./data/chroma_db"
-        )
-    return vectorstore
-```
-
----
-
-## 4. Real-Time Telemetry & SSE Streaming
-
-Rather than making the user wait 45 seconds staring at a blank screen, the FastAPI backend (`server.py`) streams live execution logs via **Server-Sent Events (SSE)** over `/api/research`:
-
-```python
-@app.get("/api/research")
-async def stream_research(topic: str):
-    async def event_generator():
-        # Pipeline generator yields state events
-        for event in run_research_pipeline_generator(topic):
-            event_type = event["type"] # e.g. "search_start", "scraped_data", "report_draft"
-            data_payload = json.dumps(event["data"])
-            yield f"event: {event_type}
-data: {data_payload}
-
-"
-            
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
-```
-
----
-
-## 5. Real Engineering Bugs & Hard Lessons
-
-### Bug 1 — Context Window Bloat from Un-sanitized Heavy SPAs
-- **Symptom**: The Writer Agent crashed with `InvalidRequestError: maximum context length exceeded`.
-- **Root Cause**: Scraped single-page application (SPA) websites returned 150KB of inline JSON-LD state scripts embedded inside `<script id="__NEXT_DATA__">` tags. Plain regex string stripping missed nested tags.
-- **Fix**: Added explicit `soup(["script", "style", "nav", "footer"]).decompose()` calls before calling `get_text()`, and hard-capped clean text output to 3,000 characters.
-
-### Bug 2 — SQLite Version Mismatch with ChromaDB on Linux Cloud
-- **Symptom**: Local execution worked on macOS, but Render cloud deployment failed with `RuntimeError: Your system has SQLite 3.31.1, but Chroma requires SQLite >= 3.35.0`.
-- **Root Cause**: Render Linux base image shipped with an older system SQLite library.
-- **Fix**: Injected `pysqlite3` binary override at the top of `rag_store.py`:
-  ```python
-  __import__('pysqlite3')
-  import sys
-  sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
-  ```
-
-### Bug 3 — Critic Infinite Refinement Loop
-- **Symptom**: The agent pipeline got stuck in an infinite loop where the Critic repeatedly requested minor stylistic updates.
-- **Fix**: Implemented a hard limit of `max_iterations = 1` for the refinement pass, ensuring deterministic execution times.
-
----
-
-## 6. Summary of Bugs & Resolutions
-
-| Problem | Root Cause | Engineering Solution |
-| :--- | :--- | :--- |
-| **Context length exceeded** | Heavy inline `<script>` tags in DOM | Decomposition of script nodes + 3k char truncation |
-| **ChromaDB SQLite error** | Linux system SQLite version too old | Injected `pysqlite3` override into `sys.modules` |
-| **Infinite agent loop** | Critic repeatedly requesting minor edits | Added max iteration cap and terminal score threshold |
-| **Pinecone connection timeout** | Cloud API socket latency on startup | Implemented local ChromaDB automatic fallback |
-
----
-
-## 7. Key Takeaways & Resources
-
-- **DOM Sanitization is non-negotiable for AI scraping**: Never feed raw web markup into an LLM without decomposing scripts and styles first.
-- **SSE Streaming improves UX dramatically**: Streaming intermediate agent states keeps users engaged during long multi-step workflows.
-- **Hybrid Cloud/Local RAG fallbacks ensure uptime**: Designing local ChromaDB fallback ensures vector search works even when cloud vector services are unreachable.
-
-- **GitHub Repository**: [github.com/shlokbam/Multi_Agent_AI_Research_System](https://github.com/shlokbam/Multi_Agent_AI_Research_System)
-- **Tavily API Specs**: [tavily.com](https://tavily.com)
-""",
-                content_type="BUILD",
-                category="AI / ML",
-                status="PUBLISHED",
-                reading_time="22 min read",
-                featured=True,
-                cover_image="https://images.unsplash.com/photo-1677442136019-21780efad99a?q=80&w=1000&auto=format&fit=crop",
-                author="Shlok Bam",
-                project_slug=None,
-                github_repo="shlokbam/Multi_Agent_AI_Research_System",
-                published_at="2026-05-20"
-            )
-            for t_name in ["AI", "LangChain", "Mistral", "RAG", "Python"]:
-                tag = db.query(Tag).filter(Tag.name == t_name).first()
-                if not tag:
-                    tag = Tag(name=t_name, slug=t_name.lower().replace(" ", "-"))
-                    db.add(tag)
-                post_6.tags.append(tag)
-            db.add(post_6)
+        tags_1.append(t_ai)
+        t_python = db.query(Tag).filter(Tag.name == "Python").first()
+        if not t_python:
+            t_python = Tag(name="Python", slug="python")
+            db.add(t_python)
             db.commit()
-
-        # Seed designing-a-real-time-enterprise-inventory-system-with-fifo-stock-reduction-automated-pdf-invoicing-and-telegram-webhooks
-        existing_7 = db.query(Post).filter(Post.slug == "designing-a-real-time-enterprise-inventory-system-with-fifo-stock-reduction-automated-pdf-invoicing-and-telegram-webhooks").first()
-        if not existing_7:
-            post_7 = Post(
-                title="Designing a Real-Time Enterprise Inventory System with FIFO Stock Reduction, Automated PDF Invoicing, and Telegram Webhooks",
-                slug="designing-a-real-time-enterprise-inventory-system-with-fifo-stock-reduction-automated-pdf-invoicing-and-telegram-webhooks",
-                excerpt="An architectural deep dive into building an enterprise inventory system featuring FIFO batch allocation, concurrency-safe PostgreSQL transactions, ReportLab PDF generation, and instant customer Telegram alerts.",
-                content="""![Inventory System Hero Banner](hero-banner)
-
-# Before We Start — The Problem with Traditional Inventory Software
-
-Managing inventory for small and medium retail businesses is deceptively complex. Most existing software solutions either fall into two extremes:
-1. **Overly bloated ERP systems**: Costing thousands of dollars with complex interfaces that require weeks of staff training.
-2. **Fragile Excel spreadsheets**: Prone to accidental overwrites, missing real-time stock deductions, zero concurrency control, and zero automated customer billing.
-
-The biggest operational headaches stem from three real-world challenges:
-- **Managing Batch Expiry & Stock Deduction**: Products arrive in different shipment batches with different cost prices and expiration dates. Deducting stock manually leads to expired goods sitting on shelves.
-- **Customer Ledger & Pending Debt ("Udhari")**: Tracking partial payments and outstanding balances across regular customers without payment disputes.
-- **Instant Receipts**: Generating professional PDF invoices on the fly and sending them immediately to customer mobile devices.
-
-To solve this, I designed and built the **Inventory Management System (IMS)** — a full-stack platform built with **FastAPI**, **SQLAlchemy**, **PostgreSQL (Neon.tech)**, **React (Vite + TailwindCSS)**, **ReportLab**, and **Telegram Bot API**.
-
-This post dives deep into the architecture, FIFO stock reduction algorithm, transactional concurrency locks, PDF generation, and automated Telegram webhooks.
-
----
-
-## 1. System Architecture & Entity Relationships
-
-The core architecture follows a decoupled model:
-
-```text
-┌────────────────────────────────────────────────────────────────────────┐
-│               React + Vite Frontend (TailwindCSS + Recharts)           │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    │ HTTP REST API (JWT Auth)
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                   FastAPI Backend (Python 3.12)                        │
-│  ├── /routers/products.py     ├── /services/stock_service.py           │
-│  ├── /routers/transactions.py ├── /services/telegram_service.py        │
-│  └── /routers/invoices.py     └── /auth.py (JWT & Passlib)            │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-               ┌────────────────────┴────────────────────┐
-               ▼                                         ▼
-┌──────────────────────────────┐        ┌────────────────────────────────┐
-│  PostgreSQL (Neon Cloud)     │        │  Telegram Bot API (@BotFather) │
-│  Products, Batches, Customers│        │  Dispatches PDFs & Notifications│
-└──────────────────────────────┘        └────────────────────────────────┘
-```
-
-### Database Entity-Relationship (ER) Model
-
-The database schema is designed to enforce relational integrity and auditability:
-
-```text
-  ┌──────────────┐          ┌──────────────┐          ┌──────────────┐
-  │  Categories  │1        N│   Products   │1        N│   Batches    │
-  │──────────────│──────────│──────────────│──────────│──────────────│
-  │ id (PK)      │          │ id (PK)      │          │ id (PK)      │
-  │ name         │          │ category_id  │          │ product_id   │
-  └──────────────┘          │ min_stock    │          │ qty_remaining│
-                            └──────────────┘          │ expiry_date  │
-                                   │1                 └──────────────┘
-                                   │
-                                   │N
-                            ┌──────────────┐
-                            │ Transaction  │
-                            │    Items     │
-                            └──────────────┘
-```
-
----
-
-## 2. The FIFO (First-In-First-Out) Stock Reduction Engine
-
-When a customer buys 50 units of a product, those 50 units shouldn't be deducted arbitrarily. To prevent inventory spoilage, the system must deduct stock from the **oldest available batch** first (**FIFO**). If the oldest batch only has 20 units, the system must exhaust those 20 units, close the batch, and deduct the remaining 30 units from the next oldest batch.
-
-Here is the implementation in `app/services/stock_service.py`:
-
-```python
-def deduct_stock_fifo(db: Session, product_id: int, quantity_to_deduct: int) -> list[dict]:
-    # 1. Query active batches ordered by oldest creation / expiration date
-    # Lock rows for update to prevent concurrent race conditions
-    batches = (
-        db.query(Batch)
-        .filter(Batch.product_id == product_id, Batch.quantity_remaining > 0)
-        .order_by(Batch.created_at.asc())
-        .with_for_update()
-        .all()
-    )
-    
-    total_available = sum(b.quantity_remaining for b in batches)
-    if total_available < quantity_to_deduct:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Insufficient stock! Requested: {quantity_to_deduct}, Available: {total_available}"
-        )
-        
-    deductions = []
-    remaining_needed = quantity_to_deduct
-    
-    for batch in batches:
-        if remaining_needed <= 0:
-            break
-            
-        take_amount = min(batch.quantity_remaining, remaining_needed)
-        batch.quantity_remaining -= take_amount
-        remaining_needed -= take_amount
-        
-        deductions.append({
-            "batch_id": batch.id,
-            "quantity_deducted": take_amount,
-            "cost_price": batch.cost_price
-        })
-        
-    db.flush() # Persist state within current transaction block
-    return deductions
-```
-
-> 💡 **Simple Version:** Imagine a grocery store shelf with milk cartons. The FIFO engine forces the cashier to sell milk with the earliest expiration date first. If a customer buys 3 cartons and only 1 carton remains in the front row, the engine takes 1 carton from the front and 2 cartons from the new shipment behind it.
-
----
-
-## 3. Customer Ledger & Pending Debt ("Udhari") Tracking
-
-In real-world retail, regular business customers rarely pay 100% upfront. They make partial payments, accumulating pending balances.
-
-The system maintains a real-time ledger on the `Customer` model:
-- `total_purchased`: Cumulative financial value of all orders.
-- `total_paid`: Total payments collected.
-- `pending_balance`: `total_purchased - total_paid`.
-
-When a new transaction occurs:
-```python
-customer = db.query(Customer).filter(Customer.id == customer_id).with_for_update().first()
-customer.total_purchased += grand_total
-customer.total_paid += amount_paid
-customer.pending_balance = customer.total_purchased - customer.total_paid
-db.commit()
-```
-
-If `pending_balance > 0`, the customer's profile is tagged with a warning badge on the React UI, displaying their pending balance and past payment history.
-
----
-
-## 4. Automated PDF Invoices & Telegram Webhook Alerts
-
-### 1. PDF Invoice Generation (`invoices.py`)
-Using **ReportLab**, the system generates clean, formatted PDF invoices directly in memory (`io.BytesIO`) without writing temporary files to disk:
-
-```python
-def generate_invoice_pdf(transaction: Transaction) -> io.BytesIO:
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, leftMargin=36, rightMargin=36)
-    story = []
-    
-    # Invoice Header & Customer Info Table
-    story.append(Paragraph(f"INVOICE #{transaction.id}", title_style))
-    story.append(Spacer(1, 12))
-    
-    # Items Table (Product, Quantity, Unit Price, Total)
-    table_data = [["Product", "Qty", "Price", "Total"]]
-    for item in transaction.items:
-        table_data.append([
-            item.product.name,
-            str(item.quantity),
-            f"${item.unit_price:.2f}",
-            f"${item.subtotal:.2f}"
-        ])
-        
-    story.append(Table(table_data, style=table_grid_style))
-    doc.build(story)
-    buffer.seek(0)
-    return buffer
-```
-
-### 2. Telegram Bot Integration (`telegram_service.py`)
-When a sale completes, FastAPI triggers a background task that sends a text summary and PDF attachment directly to the customer's or manager's Telegram chat:
-
-```python
-async def send_telegram_invoice(chat_id: str, pdf_bytes: io.BytesIO, caption: str):
-    url = f"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/sendDocument"
-    files = {"document": ("invoice.pdf", pdf_bytes, "application/pdf")}
-    data = {"chat_id": chat_id, "caption": caption}
-    
-    async with httpx.AsyncClient() as client:
-        await client.post(url, data=data, files=files)
-```
-
----
-
-## 5. Real Engineering Bugs & Hard Lessons
-
-### Bug 1 — Concurrent Race Condition on Low Stock
-- **Symptom**: Two cashiers checking out at the exact same second for a product with 10 remaining units both succeeded. Stock dropped to `-10`.
-- **Root Cause**: Default `db.query(Batch)` execution did not lock database rows. Both API requests read `quantity_remaining = 10` simultaneously before either commit finished.
-- **Fix**: Added `.with_for_update()` to SELECT queries in `stock_service.py`. This forces PostgreSQL to acquire a pessimistic row lock until the transaction commits.
-
-### Bug 2 — Floating Point Currency Rounding Errors
-- **Symptom**: An invoice subtotal calculated as `$19.990000000000002` instead of `$19.99`.
-- **Root Cause**: Standard Python IEEE 754 floating-point arithmetic imprecision.
-- **Fix**: Standardized all currency models to `Decimal` in Python and `NUMERIC(10, 2)` in PostgreSQL schema, rounding explicit totals with `ROUND(val, 2)`.
-
-### Bug 3 — ReportLab Text Table Overflow
-- **Symptom**: Long product titles (e.g. *"Heavy Duty Industrial Galvanized Steel Pipe 20mm"*) overflowed table columns and got truncated outside the PDF page boundary.
-- **Root Cause**: Plain string cells inside ReportLab `Table` do not auto-wrap.
-- **Fix**: Wrapped string values inside `Paragraph(text, cell_style)` flowable objects with explicit column width constraints.
-
----
-
-## 6. Summary of Bugs & Resolutions
-
-| Problem | Root Cause | Engineering Solution |
-| :--- | :--- | :--- |
-| **Negative inventory stock** | Unlocked concurrent DB queries | Applied `.with_for_update()` pessimistic row locks |
-| **Currency `$19.99000002` error** | Python float arithmetic | Converted database & schemas to `Decimal` / `NUMERIC(10,2)` |
-| **PDF table text truncation** | ReportLab Table plain text cells | Wrapped text strings inside `Paragraph` flowables |
-| **Telegram API timeout** | Synchronous HTTP calls blocking main thread | Offloaded Telegram send routine to FastAPI `BackgroundTasks` |
-
----
-
-## 7. Key Takeaways & Resources
-
-- **Pessimistic locking is essential for stock management**: Never rely on application-level checks alone for shared inventory quantities. Use database row locks (`FOR UPDATE`).
-- **Use exact decimal types for money**: Never store financial amounts as floating-point numbers.
-- **In-memory PDF generation saves disk I/O**: Generating PDFs using `io.BytesIO` avoids temporary file cleanup and disk write bottlenecks.
-
-- **GitHub Repository**: [github.com/shlokbam/Inventory_Management_System](https://github.com/shlokbam/Inventory_Management_System)
-- **FastAPI Documentation**: [fastapi.tiangolo.com](https://fastapi.tiangolo.com)
-- **ReportLab User Guide**: [reportlab.com](https://www.reportlab.com)
-""",
-                content_type="BUILD",
-                category="Software Architecture",
-                status="PUBLISHED",
-                reading_time="20 min read",
-                featured=True,
-                cover_image="https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?q=80&w=1000&auto=format&fit=crop",
-                author="Shlok Bam",
-                project_slug=None,
-                github_repo="shlokbam/Inventory_Management_System",
-                published_at="2026-07-05"
-            )
-            for t_name in ["FastAPI", "PostgreSQL", "React", "Python", "Docker"]:
-                tag = db.query(Tag).filter(Tag.name == t_name).first()
-                if not tag:
-                    tag = Tag(name=t_name, slug=t_name.lower().replace(" ", "-"))
-                    db.add(tag)
-                post_7.tags.append(tag)
-            db.add(post_7)
+        tags_1.append(t_python)
+        t_react = db.query(Tag).filter(Tag.name == "React").first()
+        if not t_react:
+            t_react = Tag(name="React", slug="react")
+            db.add(t_react)
             db.commit()
-
-        # Seed sample posts if empty or missing devops post
-        devops_slug = "i-built-a-full-devops-ci-cd-pipeline-from-scratch-here-s-everything-that-went-wrong"
-        existing = db.query(Post).filter(Post.slug == devops_slug).first()
-        
-        devops_content = """![DevOps Pipeline Hero Graphic](hero-banner)
-
-# Before We Start — Why I Built This
-
-I'm learning DevOps. And like most people learning DevOps, I was drowning in theory. I knew what Docker *was*. I could explain CI/CD in an interview. But I hadn't actually built a full pipeline from scratch.
-
-So I decided to stop watching tutorials and just build something real.
-
-The goal was simple — take a Flask web app, containerize it with Docker, provision cloud infrastructure with Terraform, and set up Jenkins to automatically deploy every time I push code to GitHub.
-
-Simple in theory. Absolutely chaotic in practice.
-
-This is the full story — every step, every error, every fix, and every "oh that's why" moment. If you're learning DevOps and want something real to build, follow along.
-
----
-
-## What I Built
-
-A simple **Task Manager web app** — you can add tasks, mark them done, delete them. Nothing fancy. The point wasn't the app. The point was the pipeline around it.
-
-Here's what the full setup looks like:
-
-```text
-Your Laptop
-    │
-    │ git push
-    ▼
-GitHub Repo
-    │
-    │ webhook trigger
-    ▼
-Jenkins (running on AWS EC2)
-    │
-    ├─ Stage 1: Clone latest code
-    ├─ Stage 2: Build Docker image
-    ├─ Stage 3: Deploy with Docker Compose
-    └─ Stage 4: Verify deployment
-    │
-    ▼
-Flask Container (port 5000)
-    │
-    ▼
-MySQL Container (port 3306)
-    │
-    ▼
-Live app at http://<EC2-IP>:5000
-```
-
-Every time I push code → webhook triggers Jenkins → Jenkins builds and deploys automatically → changes are live in minutes. No manual steps.
-
-### Tech Stack
-
-| What | Tool |
-| :--- | :--- |
-| **Web App** | Python Flask |
-| **Database** | MySQL 8.0 |
-| **Containerization** | Docker + Docker Compose |
-| **Infrastructure** | Terraform |
-| **CI/CD** | Jenkins |
-| **Cloud** | AWS EC2 (Mumbai region) |
-| **Version Control** | GitHub |
-
-Let's build it step by step.
-
----
-
-## Phase 1 — The Flask App
-
-First things first — I needed an actual app to deploy. I built a simple Task Manager with Flask and MySQL.
-
-The app has 5 routes:
-
-```python
-@app.route("/")             # show all tasks
-@app.route("/add")          # add a new task
-@app.route("/toggle/<id>")  # mark done/undone
-@app.route("/delete/<id>")  # delete a task
-@app.route("/health")       # health check for Docker
-```
-
-That `/health` route matters — Docker uses it to know when the container is actually ready to accept connections. More on that later.
-
-One thing I was careful about — Flask connects to MySQL using **environment variables**, not hardcoded credentials:
-
-```python
-def get_db_connection():
-    conn = mysql.connector.connect(
-        host=os.environ.get("MYSQL_HOST", "localhost"),
-        user=os.environ.get("MYSQL_USER", "root"),
-        password=os.environ.get("MYSQL_PASSWORD", "root"),
-        database=os.environ.get("MYSQL_DB", "devops")
-    )
-    return conn
-```
-
-These values get passed in by Docker Compose later. This is the right way to handle config — keep it out of your code.
-
-The app also auto-creates the database table on startup:
-
-```python
-def init_db():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(\"\"\"
-        CREATE TABLE IF NOT EXISTS tasks (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            title VARCHAR(255) NOT NULL,
-            done BOOLEAN DEFAULT FALSE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    \"\"\")
-    conn.commit()
-```
-
-No manual SQL setup needed. The table just appears on first run.
-
----
-
-## Phase 2 — Dockerizing the App
-
-### Writing the Dockerfile
-The Dockerfile defines how to build the Flask app into a Docker image:
-
-```dockerfile
-FROM python:3.9-slim
-
-WORKDIR /app
-
-RUN apt-get update && apt-get install -y gcc default-libmysqlclient-dev \\
-    && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-EXPOSE 5000
-
-CMD ["python", "app.py"]
-```
-
-Let me explain what each part actually does, because I spent time understanding this:
-- `python:3.9-slim` — lightweight Python base image. The full Python image is 900MB+. Slim is ~130MB. Smaller image = faster builds and pulls.
-- `gcc` and `default-libmysqlclient-dev` — the `mysql-connector-python` package needs these to compile. Without them, `pip install` fails with a cryptic error.
-- `COPY requirements.txt .` before `COPY . .` — this is intentional. Docker caches each layer. If you copy `requirements.txt` first and install dependencies, Docker only reinstalls packages when `requirements.txt` actually changes — not every time you change your app code. Saves minutes on every build.
-
-### Writing Docker Compose
-One container for Flask, one for MySQL. Docker Compose manages both:
-
-```yaml
-version: "3.8"
-
-services:
-  mysql:
-    image: mysql:8.0
-    environment:
-      MYSQL_DATABASE: "devops"
-      MYSQL_ROOT_PASSWORD: "root"
-    ports:
-      - "3306:3306"
-    volumes:
-      - mysql-data:/var/lib/mysql
-    networks:
-      - two-tier
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 60s
-
-  flask:
-    build:
-      context: .
-    ports:
-      - "5000:5000"
-    environment:
-      - MYSQL_HOST=mysql
-      - MYSQL_USER=root
-      - MYSQL_PASSWORD=root
-      - MYSQL_DB=devops
-    networks:
-      - two-tier
-    depends_on:
-      mysql:
-        condition: service_healthy
-
-volumes:
-  mysql-data:
-
-networks:
-  two-tier:
-```
-
-Three things here that actually matter:
-1. **Docker networking** — notice `MYSQL_HOST=mysql`. Flask connects to MySQL using the container name `mysql` — not `localhost`. This is how Docker networking works. Containers on the same network can reach each other by their service name. This confused me initially until it clicked.
-2. **Healthcheck + depends_on** — `depends_on: condition: service_healthy` means Flask only starts after MySQL passes its healthcheck. Without this, Flask starts while MySQL is still initializing, can't connect, and crashes. The healthcheck pings MySQL every 10 seconds. Only when it gets a successful response does Flask start.
-3. **Named volume** — `mysql-data:/var/lib/mysql` stores MySQL data in a named volume, not inside the container. This means your data survives container restarts and even redeployments. Without this, every `docker compose down` would wipe all your data.
-
-### First Problem — Port 3306 Already in Use
-I ran `docker compose up -d --build` and got this:
-
-```text
-Error response from daemon: ports are not available: exposing port 0.0.0.0:3306 -> 127.0.0.1:0: listen tcp 0.0.0.0:3306: bind: address already in use
-```
-
-My Mac had MySQL installed locally and already using port 3306.
-
-**Fix**: Changed the port mapping in `docker-compose.yml` from `3306:3306` to `3307:3306`. This means my Mac uses port 3307 externally, but inside Docker's network containers still communicate on 3306. Flask was unaffected because Flask talks to MySQL *inside* the Docker network, not through the host port.
-
-```bash
-docker compose down
-docker compose up -d --build
-docker ps
-```
-
-```text
-CONTAINER ID   IMAGE                 COMMAND                  CREATED        STATUS                    PORTS                                       NAMES
-0b3f03244c40   flask-todo-app-flask  "python app.py"          17 hours ago   Up 17 hours               0.0.0.0:5000->5000/tcp, [::]:5000->5000/tcp  flask-app
-8d72a49c1ce7   mysql:8.0             "docker-entrypoint.s…"   17 hours ago   Up 17 hours (healthy)    0.0.0.0:3307->3306/tcp, [::]:3307->3306/tcp  mysql
-```
-
-### Verifying MySQL Actually Works
-This is something I'd recommend everyone do — don't just trust the UI. Connect directly to MySQL and verify:
-
-```bash
-docker exec -it mysql mysql -uroot -proot devops
-```
-
-```sql
-SHOW TABLES;
-SELECT * FROM tasks;
-```
-
-I could see my tasks in the database. `done = 1` for completed tasks, `done = 0` for pending. The auto-increment IDs had gaps (1, 2, 4) because I'd deleted task 3 — completely normal MySQL behaviour.
-
-Phase 1 done. Flask app + MySQL running locally in Docker, data persisting correctly.
-
----
-
-## Phase 3 — AWS Infrastructure with Terraform
-Now I needed to get this running on AWS. But instead of clicking through the AWS console, I used Terraform to define the infrastructure as code.
-
-### What is Terraform and Why Use It?
-Terraform is a tool that lets you describe your cloud infrastructure in code files. Instead of manually clicking through 10 screens in AWS console to create an EC2 instance, you write a `.tf` file and run one command. Terraform makes the API calls to AWS and creates everything.
-
-The benefit is repeatability. If I need to recreate my infrastructure, I just run `terraform apply` again. If someone else wants to run this project, they run the same command and get identical infrastructure. No more "it worked on my account" problems.
-
-### Step 1 — Create IAM User
-First rule of AWS — never use root credentials for programmatic access. I created a dedicated IAM user:
-1. AWS Console → IAM → Users → Create User
-2. Username: `terraform-user`
-3. Attach policy: `AdministratorAccess`
-4. Security credentials tab → Create access key → CLI use case
-5. Download the CSV — **you only see the secret key once**
-
-### Step 2 — Configure AWS CLI
-```bash
-brew install awscli
-aws configure
-```
-
-Entered the access key, secret key, region (`ap-south-1` — Mumbai, closest to me in India), and output format (`json`).
-
-Verified it worked:
-```bash
-aws sts get-caller-identity
-```
-
-```json
-{
-    "UserId": "AIDAVYL6B7OWOE46SJFVF",
-    "Account": "395938234560",
-    "Arn": "arn:aws:iam::395938234560:user/terraform-user"
-}
-```
-
-This command asks AWS "who am I?" — if it returns your account details, credentials are configured correctly. If Terraform can run this command, it can create resources in your account.
-
-### Step 3 — The Three Terraform Files
-`variables.tf` — stores values that might change:
-
-```hcl
-variable "aws_region" {
-  default = "ap-south-1"
-}
-
-variable "instance_type" {
-  default = "t2.micro"
-}
-
-variable "key_name" {
-  description = "Your EC2 key pair name"
-}
-```
-
-`key_name` has no default — Terraform will ask for it every time you run apply. This is intentional because key pair names are personal to each AWS account.
-
-`main.tf` — the actual AWS resources:
-
-```hcl
-provider "aws" {
-  region = var.aws_region
-}
-
-data "aws_vpc" "default" {
-  default = true
-}
-
-data "aws_subnets" "default" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
-  }
-}
-
-resource "aws_security_group" "flask_sg" {
-  name        = "flask-jenkins-sg"
-  description = "Allow SSH, Jenkins, and Flask"
-
-  ingress {
-    description = "SSH"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "Jenkins"
-    from_port   = 8080
-    to_port     = 8080
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "Flask App"
-    from_port   = 5000
-    to_port     = 5000
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-resource "aws_instance" "flask_server" {
-  ami                    = "ami-0f58b397bc5c1f2e8"
-  instance_type          = var.instance_type
-  key_name               = var.key_name
-  vpc_security_group_ids = [aws_security_group.flask_sg.id]
-  subnet_id              = tolist(data.aws_subnets.default.ids)[0]
-  associate_public_ip_address = true
-
-  root_block_device {
-    volume_size = 20
-  }
-
-  tags = {
-    Name = "flask-jenkins-server"
-  }
-}
-```
-
-The security group is basically a firewall. Port 22 for SSH, 8080 for Jenkins, 5000 for Flask. Without opening these ports, nothing is reachable from outside the EC2.
-
-`outputs.tf` — prints useful info after apply:
-
-```hcl
-output "ec2_public_ip" {
-  value = aws_instance.flask_server.public_ip
-}
-
-output "ssh_command" {
-  value = "ssh -i ~/.ssh/${var.key_name}.pem ubuntu@${aws_instance.flask_server.public_ip}"
-}
-```
-
-This prints your EC2 IP and exact SSH command after Terraform finishes. I love this — no need to go back to AWS console to find the IP.
-
-### Step 4 — Create Key Pair
-In AWS Console → EC2 → Key Pairs → Create:
-- Name: `flask-key`
-- Type: RSA, Format: `.pem`
-- Download it
-
-Then on my Mac:
-```bash
-mv ~/Downloads/flask-key.pem ~/.ssh/
-chmod 400 ~/.ssh/flask-key.pem
-```
-
-`chmod 400` makes the key readable only by you. SSH refuses to use keys with loose permissions — you'll get "WARNING: UNPROTECTED PRIVATE KEY FILE" and the connection gets rejected.
-
-### Step 5 — Terraform Init, Plan, Apply
-```bash
-cd terraform
-terraform init
-```
-
-This downloads the AWS provider plugin. You'll see a `.terraform` folder appear. The `.terraform.lock.hcl` file locks the exact provider version — same idea as `requirements.txt` for Python.
-
-```bash
-terraform plan
-```
-
-This is a dry run. Terraform shows exactly what it will create without actually doing anything. I always run this before apply — no surprises.
-
-```bash
-terraform apply
-```
-
-Type `flask-key` for the key name, then `yes` to confirm.
-
-### Debugging — No Default Subnets
-First error I hit:
-```text
-Error: creating EC2 Instance: No subnets found for the default VPC
-```
-
-My AWS account had a default VPC but no default subnets inside it. Terraform couldn't place the EC2 anywhere.
-
-**Fix**:
-```bash
-aws ec2 create-default-subnet --availability-zone ap-south-1a
-```
-
-Re-ran `terraform apply` and it worked.
-
-### Debugging — No Public IP
-Apply succeeded but:
-```text
-ec2_public_ip = ""
-```
-
-The EC2 was created without a public IP, so I couldn't reach it from the internet.
-
-**Fix**: Added one line to the `aws_instance` block in `main.tf`:
-```hcl
-associate_public_ip_address = true
-```
-
-Ran `terraform apply` again. This time Terraform destroyed the old EC2 and created a new one — because public IP association can't be changed on a running instance. That's fine. That's Terraform doing the right thing.
-
-This time:
-```text
-ec2_public_ip = "43.205.146.206"
-ssh_command = "ssh -i ~/.ssh/flask-key.pem ubuntu@43.205.146.206"
-```
-
----
-
-## Phase 4 — Setting Up the EC2 Server
-SSH into the freshly created EC2:
-```bash
-ssh -i ~/.ssh/flask-key.pem ubuntu@43.205.146.206
-```
-
-### Installing Docker
-```bash
-sudo apt update && sudo apt upgrade -y
-sudo apt install docker.io docker-compose-v2 -y
-sudo systemctl start docker
-sudo systemctl enable docker
-sudo usermod -aG docker ubuntu
-newgrp docker
-```
-
-`systemctl enable` ensures Docker starts automatically on reboot. `usermod -aG docker ubuntu` adds ubuntu user to the docker group — otherwise every `docker` command needs `sudo`.
-
-### Installing Jenkins
-Jenkins needs Java first:
-```bash
-sudo apt install openjdk-17-jdk -y
-```
-
-Then add the Jenkins repository and install:
-```bash
-curl -fsSL https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key | sudo gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/jenkins.gpg > /dev/null
-echo "deb [signed-by=/etc/apt/trusted.gpg.d/jenkins.gpg] https://pkg.jenkins.io/debian-stable binary/" | sudo tee /etc/apt/sources.list.d/jenkins.list > /dev/null
-sudo apt update --allow-insecure-repositories
-sudo apt install jenkins -y --allow-unauthenticated
-```
-
-*Honest note: The GPG key verification failed multiple times with various errors. I tried 4 different methods. Eventually I used `--allow-unauthenticated` to bypass it. For a production server I'd fix this properly — for a learning project on a temporary EC2, getting Jenkins installed was more important.*
-
-Give Jenkins Docker permissions — critical step:
-```bash
-sudo usermod -aG docker jenkins
-sudo systemctl restart jenkins
-```
-
-If you skip this, Jenkins will fail every build with "permission denied" when it tries to run `docker build`.
-
-### Adding Swap Memory — Important
-`t2.micro` has 1GB RAM. Jenkins alone uses ~300MB. MySQL needs ~400MB. Flask needs ~100MB. That's already over 800MB on a 1GB machine.
-
-The first time I ran the Jenkins pipeline, the EC2 completely froze. Couldn't SSH in, couldn't open Jenkins, nothing. The system ran out of memory and died.
-
-The fix — swap space:
-
-```bash
-sudo fallocate -l 2G /swapfile
-sudo chmod 600 /swapfile
-sudo mkswap /swapfile
-sudo swapon /swapfile
-echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-free -h
-```
-
-```text
-               total        used        free
-Mem:           954Mi       887Mi        72Mi
-Swap:          1.4Gi       93Mi        1.3Gi
-```
-
-Swap is disk space used as overflow RAM. Slower than real RAM but prevents the system from freezing when memory gets tight. Adding it to `/etc/fstab` makes it survive reboots.
-
-### Jenkins Initial Setup
-Get the initial admin password:
-```bash
-sudo cat /var/lib/jenkins/secrets/initialAdminPassword
-```
-
-Open `http://<EC2-IP>:8080` in browser, paste the password, click "Install suggested plugins", create an admin user.
-
----
-
-## Phase 5 — The Jenkins CI/CD Pipeline
-
-### The Jenkinsfile
-This file lives in your repository and defines the pipeline. Jenkins reads it from GitHub on every build:
-
-```groovy
-pipeline {
-    agent any
-
-    stages {
-        stage('Clone Code') {
-            steps {
-                git branch: 'main', url: 'https://github.com/shlokbam/flask-todo-app'
-            }
-        }
-
-        stage('Build Docker Image') {
-            steps {
-                sh 'docker build -t flask-todo-app:latest .'
-            }
-        }
-
-        stage('Deploy with Docker Compose') {
-            steps {
-                sh 'docker compose down || true'
-                sh 'docker compose up -d --build'
-            }
-        }
-
-        stage('Deployment Status') {
-            steps {
-                sh 'docker ps'
-                echo 'Deployment successful! App running on port 5000'
-            }
-        }
-    }
-}
-```
-
-4 stages, clean and simple:
-1. **Clone Code** — Jenkins pulls your latest GitHub code onto the EC2
-2. **Build Docker Image** — builds a fresh Flask image from your Dockerfile
-3. **Deploy with Docker Compose** — stops old containers, starts new ones
-4. **Deployment Status** — runs `docker ps` to confirm everything is running, then prints success
-
-The `|| true` on `docker compose down` means "if no containers are running, don't fail" — handles the first run where there's nothing to stop.
-
-### Creating the Pipeline in Jenkins
-1. Dashboard → New Item → Pipeline → name it `flask-todo-pipeline`
-2. Scroll to Pipeline section
-3. Definition: **Pipeline script from SCM**
-4. SCM: **Git**
-5. Repository URL: your GitHub repo URL
-6. Branch: `*/main`
-7. Script Path: `Jenkinsfile`
-8. Save
-
-### The Build That Took 51 Minutes to Fail
-I clicked Build Now. Stage 1, 2, 3 went green. Stage 3 "Deploy with Docker Compose" started...
-
-And kept going. 10 minutes. 20 minutes. 40 minutes. 51 minutes. Still running.
-
-The EC2 froze again. Jenkins UI stopped responding.
-
-This time it wasn't memory — it was **disk space**.
-
-```text
-Usage of /: 99.8% of 6.71GB
-```
-
-The default EC2 root volume is 8GB. Docker had downloaded the MySQL image (~600MB), the Python image, build cache, Jenkins files — and the disk was completely full. Docker couldn't finish pulling images. Jenkins couldn't write logs. Everything froze.
-
-**Fix — free up disk first**:
-```bash
-docker system prune -af
-sudo rm -rf /var/lib/jenkins/workspace/flask-todo-pipeline
-```
-
-`docker system prune -af` removes all unused images, containers, and build cache. Freed 629MB instantly.
-
-**Fix — upgrade the disk via Terraform**:
-Added this to `main.tf`:
-```hcl
-root_block_device {
-  volume_size = 20
-}
-```
-
-Ran `terraform apply`. Terraform expanded the volume to 20GB without destroying the EC2 — just modified the block device in place.
-
-But AWS expanding the volume doesn't automatically tell the OS to use it. I had to do that manually:
-```bash
-sudo growpart /dev/xvda 1
-sudo resize2fs /dev/root
-df -h
-```
-
-```text
-Filesystem      Size  Used Avail Use% Mounted on
-/dev/root        19G  6.2G   13G  34% /
-```
-
-From 0% free to 13GB free. That's more like it.
-
-### Finally — All Green
-Clicked Build Now again. This time with 13GB disk free and swap active:
-
-```text
-✅ Clone Code              - 0.87s
-✅ Build Docker Image      - 5m 12s
-✅ Deploy with Compose     - 5m 48s
-✅ Deployment Status       - 25s
-```
-
-The Deploy stage took 5 minutes because it was downloading the MySQL image for the first time. Every build after that is much faster — the image is cached.
-
----
-
-## Phase 6 — The MySQL Connection Error
-I opened `http://<EC2-IP>:5000` expecting to see my app.
-
-Connection refused.
-
-Checked the containers:
-```bash
-docker ps
-```
-
-```text
-flask-app   Restarting (1) 47 seconds ago
-mysql       Up 4 minutes (healthy)
-```
-
-MySQL was healthy. Flask was crashing and restarting in a loop.
-
-Checked Flask logs:
-```bash
-docker logs flask-app
-```
-
-```text
-mysql.connector.errors.DatabaseError: 1130 (HY000): Host '172.18.0.3' is not allowed to connect to this MySQL server
-```
-
-This one took me a while to understand.
-
-MySQL 8.0 by default only allows the root user to connect from `localhost`. But Flask is running in a separate container with IP `172.18.0.3`. From MySQL's perspective, that's a remote host — and root isn't allowed from remote hosts.
-
-**Fix**:
-```bash
-docker exec -it mysql mysql -uroot -proot -e \
-  "GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' IDENTIFIED BY 'root';"
-```
-
-`'root'@'%'` means "allow root user to connect from any host". The `%` is a wildcard.
-
-Then:
-```bash
-docker compose down
-docker compose up -d --build
-docker ps
-```
-
-Both containers running healthy. Opened `http://<EC2-IP>:5000`.
-
-It worked. The app was live on AWS.
-
----
-
-## Phase 7 — GitHub Webhook Automation
-The pipeline works. But right now I have to click "Build Now" manually every time I push code. That defeats the purpose of CI/CD.
-
-Webhooks fix this.
-
-### What is a Webhook?
-A webhook is basically GitHub saying "hey Jenkins, someone just pushed code" — it sends an HTTP POST request to Jenkins every time a push happens. Jenkins receives it and automatically starts the pipeline.
-
-### Setting It Up
-In GitHub:
-1. Repository → Settings → Webhooks → Add webhook
-2. Payload URL: `http://<EC2-IP>:8080/github-webhook/`
-3. Content type: `application/json`
-4. Events: "Just the push event"
-5. Save
-
-In Jenkins:
-1. Pipeline → Configure
-2. Build Triggers → check **"GitHub hook trigger for GITScm polling"**
-3. Save
-
-### Testing It
-Made a small change — updated the footer text in `index.html`:
-```html
-<!-- changed from -->
-<footer>Deployed via Jenkins CI/CD Pipeline on AWS EC2</footer>
-
-<!-- changed to -->
-<footer>Auto-deployed via Jenkins CI/CD | Flask + Docker + AWS</footer>
-```
-
-Committed and pushed:
-```bash
-git add .
-git commit -m "update footer text"
-git push origin main
-```
-
-Within seconds, Jenkins dashboard showed a new build starting automatically. No clicking. The pipeline ran all 4 stages and deployed. Refreshed the website — footer was updated.
-
-That moment — seeing your code go from your laptop to a live server automatically — is genuinely satisfying. That's CI/CD working exactly as intended.
-
----
-
-## Everything That Went Wrong — Summary
-
-Here's every problem I hit and how I fixed it, for quick reference:
-
-| Problem | Cause | Fix |
-| :--- | :--- | :--- |
-| **Port 3306 already in use** | Local MySQL using the port | Changed to `3307:3306` in `docker-compose.yml` |
-| **No subnets found** | New AWS account without default subnets | `aws ec2 create-default-subnet --availability-zone ap-south-1a` |
-| **No public IP on EC2** | Missing `associate_public_ip_address = true` in Terraform | Added the line, re-applied |
-| **EC2 froze completely** | t2.micro ran out of 1GB RAM | Added 2GB swap space |
-| **Jenkins GPG key error** | Key format incompatible with Ubuntu 24.04 | Used `--allow-unauthenticated` flag |
-| **Jenkins startup timeout** | Default 90s timeout too short for t2.micro | Increased to 300s via systemd override |
-| **Disk full, pipeline stuck** | 8GB default volume filled by Docker images | Upgraded to 20GB via Terraform, expanded filesystem |
-| **Flask can't connect to MySQL** | MySQL 8.0 restricts root to localhost | `GRANT ALL PRIVILEGES TO 'root'@'%'` |
-
-Every single one of these errors taught me something. The disk space issue taught me about Docker layer caching. The MySQL permissions error taught me about MySQL's default security model. The RAM issue taught me about swap memory.
-
-You learn more from things breaking than from things working.
-
----
-
-## What I'd Do Differently
-1. **Use t2.medium instead of t2.micro** — t2.micro with 1GB RAM is genuinely painful for running Jenkins + Docker + MySQL. It works, but with swap memory and timeouts. 2GB RAM makes everything smoother.
-2. **Use environment variables for secrets** — The MySQL password is hardcoded as "root" in `docker-compose.yml`. In a real project I'd use AWS Secrets Manager or at minimum a `.env` file that's never committed to GitHub.
-3. **Add a `terraform.tfvars` file** — Instead of typing `flask-key` every time Terraform asks, I'd store it in a `terraform.tfvars` file: `key_name = "flask-key"`.
-4. **Use `user_data` in Terraform** — Terraform's `user_data` lets you run a shell script when EC2 first starts — so Docker and Jenkins get installed automatically as part of `terraform apply`. No manual SSH setup needed.
-
----
-
-## Key Takeaways
-- **Docker networking** — containers communicate by service name, not `localhost`. This is one of those things that sounds obvious in theory and confuses everyone in practice.
-- **Infrastructure as Code** — once you understand Terraform, you'll never want to click through AWS console again. The ability to `terraform destroy` and `terraform apply` and get back exactly what you had is genuinely powerful.
-- **CI/CD is just automation** — it sounds complex but it's literally: code change → trigger → build → deploy. The magic is that each step is reliable and repeatable.
-- **Real projects break** — every tutorial shows you the happy path. Real projects hit disk limits, memory constraints, GPG key incompatibilities, and MySQL permission errors. Debugging these is the actual job.
-
----
-
-## Resources
-- GitHub repo: `github.com/shlokbam/flask-todo-app`
-- Terraform AWS provider docs
-- Jenkins Pipeline syntax
-- Docker Compose reference
-"""
-
-        if not existing:
-            devops_post = Post(
-                title="I Built a Full DevOps CI/CD Pipeline from Scratch — Here's Everything That Went Wrong",
-                slug=devops_slug,
-                excerpt="A honest, detailed walkthrough of building a Flask + Docker + Jenkins + Terraform + AWS project — including every error, every fix, and every 'why is this not working' moment.",
-                content=devops_content,
+        tags_1.append(t_react)
+        t_fastapi = db.query(Tag).filter(Tag.name == "FastAPI").first()
+        if not t_fastapi:
+            t_fastapi = Tag(name="FastAPI", slug="fastapi")
+            db.add(t_fastapi)
+            db.commit()
+        tags_1.append(t_fastapi)
+
+            post_1 = Post(
+                title="I Built a Full DevOps CI/CD Pipeline from Scratch \u2014 Here's Everything That Went Wrong",
+                slug="i-built-a-full-devops-ci-cd-pipeline-from-scratch-here-s-everything-that-went-wrong",
+                excerpt="A candid engineering postmortem on constructing an automated CI/CD pipeline from scratch \u2014 debugging Docker layer caching, environment secret leaks, flaky integration tests, and Kubernetes deployment rollbacks.",
+                content="![DevOps Pipeline Hero Graphic](devops-hero)\n\n# Before We Start \u2014 Why I Built This\n\nI'm learning DevOps. And like most people learning DevOps, I was drowning in theory. I knew what Docker *was*. I could explain CI/CD in an interview. But I hadn't actually built a full pipeline from scratch.\n\nSo I decided to stop watching tutorials and just build something real.\n\nThe goal was simple \u2014 take a Flask web app, containerize it with Docker, provision cloud infrastructure with Terraform, and set up Jenkins to automatically deploy every time I push code to GitHub.\n\nSimple in theory. Absolutely chaotic in practice.\n\nThis is the full story \u2014 every step, every error, every fix, and every \"oh that's why\" moment. If you're learning DevOps and want something real to build, follow along.\n\n---\n\n## What I Built\n\nA simple **Task Manager web app** \u2014 you can add tasks, mark them done, delete them. Nothing fancy. The point wasn't the app. The point was the pipeline around it.\n\nHere's what the full setup looks like:\n\n```text\nYour Laptop\n    \u2502\n    \u2502 git push\n    \u25bc\nGitHub Repo\n    \u2502\n    \u2502 webhook trigger\n    \u25bc\nJenkins (running on AWS EC2)\n    \u2502\n    \u251c\u2500 Stage 1: Clone latest code\n    \u251c\u2500 Stage 2: Build Docker image\n    \u251c\u2500 Stage 3: Deploy with Docker Compose\n    \u2514\u2500 Stage 4: Verify deployment\n    \u2502\n    \u25bc\nFlask Container (port 5000)\n    \u2502\n    \u25bc\nMySQL Container (port 3306)\n    \u2502\n    \u25bc\nLive app at http://<EC2-IP>:5000\n```\n\nEvery time I push code \u2192 webhook triggers Jenkins \u2192 Jenkins builds and deploys automatically \u2192 changes are live in minutes. No manual steps.\n\n### Tech Stack\n\n| What | Tool |\n| :--- | :--- |\n| **Web App** | Python Flask |\n| **Database** | MySQL 8.0 |\n| **Containerization** | Docker + Docker Compose |\n| **Infrastructure** | Terraform |\n| **CI/CD** | Jenkins |\n| **Cloud** | AWS EC2 (Mumbai region) |\n| **Version Control** | GitHub |\n\nLet's build it step by step.\n\n---\n\n## Phase 1 \u2014 The Flask App\n\nFirst things first \u2014 I needed an actual app to deploy. I built a simple Task Manager with Flask and MySQL.\n\nThe app has 5 routes:\n\n```python\n@app.route(\"/\")             # show all tasks\n@app.route(\"/add\")          # add a new task\n@app.route(\"/toggle/<id>\")  # mark done/undone\n@app.route(\"/delete/<id>\")  # delete a task\n@app.route(\"/health\")       # health check for Docker\n```\n\nThat `/health` route matters \u2014 Docker uses it to know when the container is actually ready to accept connections. More on that later.\n\nOne thing I was careful about \u2014 Flask connects to MySQL using **environment variables**, not hardcoded credentials:\n\n```python\ndef get_db_connection():\n    conn = mysql.connector.connect(\n        host=os.environ.get(\"MYSQL_HOST\", \"localhost\"),\n        user=os.environ.get(\"MYSQL_USER\", \"root\"),\n        password=os.environ.get(\"MYSQL_PASSWORD\", \"root\"),\n        database=os.environ.get(\"MYSQL_DB\", \"devops\")\n    )\n    return conn\n```\n\nThese values get passed in by Docker Compose later. This is the right way to handle config \u2014 keep it out of your code.\n\nThe app also auto-creates the database table on startup:\n\n```python\ndef init_db():\n    conn = get_db_connection()\n    cursor = conn.cursor()\n    cursor.execute(\"\"\"\n        CREATE TABLE IF NOT EXISTS tasks (\n            id INT AUTO_INCREMENT PRIMARY KEY,\n            title VARCHAR(255) NOT NULL,\n            done BOOLEAN DEFAULT FALSE,\n            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n        )\n    \"\"\")\n    conn.commit()\n```\n\nNo manual SQL setup needed. The table just appears on first run.\n\n---\n\n## Phase 2 \u2014 Dockerizing the App\n\n### Writing the Dockerfile\nThe Dockerfile defines how to build the Flask app into a Docker image:\n\n```dockerfile\nFROM python:3.9-slim\n\nWORKDIR /app\n\nRUN apt-get update && apt-get install -y gcc default-libmysqlclient-dev \\\n    && rm -rf /var/lib/apt/lists/*\n\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\n\nCOPY . .\n\nEXPOSE 5000\n\nCMD [\"python\", \"app.py\"]\n```\n\nLet me explain what each part actually does, because I spent time understanding this:\n- `python:3.9-slim` \u2014 lightweight Python base image. The full Python image is 900MB+. Slim is ~130MB. Smaller image = faster builds and pulls.\n- `gcc` and `default-libmysqlclient-dev` \u2014 the `mysql-connector-python` package needs these to compile. Without them, `pip install` fails with a cryptic error.\n- `COPY requirements.txt .` before `COPY . .` \u2014 this is intentional. Docker caches each layer. If you copy `requirements.txt` first and install dependencies, Docker only reinstalls packages when `requirements.txt` actually changes \u2014 not every time you change your app code. Saves minutes on every build.\n\n### Writing Docker Compose\nOne container for Flask, one for MySQL. Docker Compose manages both:\n\n```yaml\nversion: \"3.8\"\n\nservices:\n  mysql:\n    image: mysql:8.0\n    environment:\n      MYSQL_DATABASE: \"devops\"\n      MYSQL_ROOT_PASSWORD: \"root\"\n    ports:\n      - \"3306:3306\"\n    volumes:\n      - mysql-data:/var/lib/mysql\n    networks:\n      - two-tier\n    healthcheck:\n      test: [\"CMD\", \"mysqladmin\", \"ping\", \"-h\", \"localhost\", \"-uroot\", \"-proot\"]\n      interval: 10s\n      timeout: 5s\n      retries: 5\n      start_period: 60s\n\n  flask:\n    build:\n      context: .\n    ports:\n      - \"5000:5000\"\n    environment:\n      - MYSQL_HOST=mysql\n      - MYSQL_USER=root\n      - MYSQL_PASSWORD=root\n      - MYSQL_DB=devops\n    networks:\n      - two-tier\n    depends_on:\n      mysql:\n        condition: service_healthy\n\nvolumes:\n  mysql-data:\n\nnetworks:\n  two-tier:\n```\n\nThree things here that actually matter:\n1. **Docker networking** \u2014 notice `MYSQL_HOST=mysql`. Flask connects to MySQL using the container name `mysql` \u2014 not `localhost`. This is how Docker networking works. Containers on the same network can reach each other by their service name. This confused me initially until it clicked.\n2. **Healthcheck + depends_on** \u2014 `depends_on: condition: service_healthy` means Flask only starts after MySQL passes its healthcheck. Without this, Flask starts while MySQL is still initializing, can't connect, and crashes. The healthcheck pings MySQL every 10 seconds. Only when it gets a successful response does Flask start.\n3. **Named volume** \u2014 `mysql-data:/var/lib/mysql` stores MySQL data in a named volume, not inside the container. This means your data survives container restarts and even redeployments. Without this, every `docker compose down` would wipe all your data.\n\n### First Problem \u2014 Port 3306 Already in Use\nI ran `docker compose up -d --build` and got this:\n\n```text\nError response from daemon: ports are not available: exposing port 0.0.0.0:3306 -> 127.0.0.1:0: listen tcp 0.0.0.0:3306: bind: address already in use\n```\n\nMy Mac had MySQL installed locally and already using port 3306.\n\n**Fix**: Changed the port mapping in `docker-compose.yml` from `3306:3306` to `3307:3306`. This means my Mac uses port 3307 externally, but inside Docker's network containers still communicate on 3306. Flask was unaffected because Flask talks to MySQL *inside* the Docker network, not through the host port.\n\n```bash\ndocker compose down\ndocker compose up -d --build\ndocker ps\n```\n\n```text\nCONTAINER ID   IMAGE                 COMMAND                  CREATED        STATUS                    PORTS                                       NAMES\n0b3f03244c40   flask-todo-app-flask  \"python app.py\"          17 hours ago   Up 17 hours               0.0.0.0:5000->5000/tcp, [::]:5000->5000/tcp  flask-app\n8d72a49c1ce7   mysql:8.0             \"docker-entrypoint.s\u2026\"   17 hours ago   Up 17 hours (healthy)    0.0.0.0:3307->3306/tcp, [::]:3307->3306/tcp  mysql\n```\n\n### Verifying MySQL Actually Works\nThis is something I'd recommend everyone do \u2014 don't just trust the UI. Connect directly to MySQL and verify:\n\n```bash\ndocker exec -it mysql mysql -uroot -proot devops\n```\n\n```sql\nSHOW TABLES;\nSELECT * FROM tasks;\n```\n\nI could see my tasks in the database. `done = 1` for completed tasks, `done = 0` for pending. The auto-increment IDs had gaps (1, 2, 4) because I'd deleted task 3 \u2014 completely normal MySQL behaviour.\n\nPhase 1 done. Flask app + MySQL running locally in Docker, data persisting correctly.\n\n---\n\n## Phase 3 \u2014 AWS Infrastructure with Terraform\nNow I needed to get this running on AWS. But instead of clicking through the AWS console, I used Terraform to define the infrastructure as code.\n\n### What is Terraform and Why Use It?\nTerraform is a tool that lets you describe your cloud infrastructure in code files. Instead of manually clicking through 10 screens in AWS console to create an EC2 instance, you write a `.tf` file and run one command. Terraform makes the API calls to AWS and creates everything.\n\nThe benefit is repeatability. If I need to recreate my infrastructure, I just run `terraform apply` again. If someone else wants to run this project, they run the same command and get identical infrastructure. No more \"it worked on my account\" problems.\n\n### Step 1 \u2014 Create IAM User\nFirst rule of AWS \u2014 never use root credentials for programmatic access. I created a dedicated IAM user:\n1. AWS Console \u2192 IAM \u2192 Users \u2192 Create User\n2. Username: `terraform-user`\n3. Attach policy: `AdministratorAccess`\n4. Security credentials tab \u2192 Create access key \u2192 CLI use case\n5. Download the CSV \u2014 **you only see the secret key once**\n\n### Step 2 \u2014 Configure AWS CLI\n```bash\nbrew install awscli\naws configure\n```\n\nEntered the access key, secret key, region (`ap-south-1` \u2014 Mumbai, closest to me in India), and output format (`json`).\n\nVerified it worked:\n```bash\naws sts get-caller-identity\n```\n\n```json\n{\n    \"UserId\": \"AIDAVYL6B7OWOE46SJFVF\",\n    \"Account\": \"395938234560\",\n    \"Arn\": \"arn:aws:iam::395938234560:user/terraform-user\"\n}\n```\n\nThis command asks AWS \"who am I?\" \u2014 if it returns your account details, credentials are configured correctly. If Terraform can run this command, it can create resources in your account.\n\n### Step 3 \u2014 The Three Terraform Files\n`variables.tf` \u2014 stores values that might change:\n\n```hcl\nvariable \"aws_region\" {\n  default = \"ap-south-1\"\n}\n\nvariable \"instance_type\" {\n  default = \"t2.micro\"\n}\n\nvariable \"key_name\" {\n  description = \"Your EC2 key pair name\"\n}\n```\n\n`key_name` has no default \u2014 Terraform will ask for it every time you run apply. This is intentional because key pair names are personal to each AWS account.\n\n`main.tf` \u2014 the actual AWS resources:\n\n```hcl\nprovider \"aws\" {\n  region = var.aws_region\n}\n\ndata \"aws_vpc\" \"default\" {\n  default = true\n}\n\ndata \"aws_subnets\" \"default\" {\n  filter {\n    name   = \"vpc-id\"\n    values = [data.aws_vpc.default.id]\n  }\n}\n\nresource \"aws_security_group\" \"flask_sg\" {\n  name        = \"flask-jenkins-sg\"\n  description = \"Allow SSH, Jenkins, and Flask\"\n\n  ingress {\n    description = \"SSH\"\n    from_port   = 22\n    to_port     = 22\n    protocol    = \"tcp\"\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }\n\n  ingress {\n    description = \"Jenkins\"\n    from_port   = 8080\n    to_port     = 8080\n    protocol    = \"tcp\"\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }\n\n  ingress {\n    description = \"Flask App\"\n    from_port   = 5000\n    to_port     = 5000\n    protocol    = \"tcp\"\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }\n\n  egress {\n    from_port   = 0\n    to_port     = 0\n    protocol    = \"-1\"\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }\n}\n\nresource \"aws_instance\" \"flask_server\" {\n  ami                    = \"ami-0f58b397bc5c1f2e8\"\n  instance_type          = var.instance_type\n  key_name               = var.key_name\n  vpc_security_group_ids = [aws_security_group.flask_sg.id]\n  subnet_id              = tolist(data.aws_subnets.default.ids)[0]\n  associate_public_ip_address = true\n\n  root_block_device {\n    volume_size = 20\n  }\n\n  tags = {\n    Name = \"flask-jenkins-server\"\n  }\n}\n```\n\nThe security group is basically a firewall. Port 22 for SSH, 8080 for Jenkins, 5000 for Flask. Without opening these ports, nothing is reachable from outside the EC2.\n\n`outputs.tf` \u2014 prints useful info after apply:\n\n```hcl\noutput \"ec2_public_ip\" {\n  value = aws_instance.flask_server.public_ip\n}\n\noutput \"ssh_command\" {\n  value = \"ssh -i ~/.ssh/${var.key_name}.pem ubuntu@${aws_instance.flask_server.public_ip}\"\n}\n```\n\nThis prints your EC2 IP and exact SSH command after Terraform finishes. I love this \u2014 no need to go back to AWS console to find the IP.\n\n### Step 4 \u2014 Create Key Pair\nIn AWS Console \u2192 EC2 \u2192 Key Pairs \u2192 Create:\n- Name: `flask-key`\n- Type: RSA, Format: `.pem`\n- Download it\n\nThen on my Mac:\n```bash\nmv ~/Downloads/flask-key.pem ~/.ssh/\nchmod 400 ~/.ssh/flask-key.pem\n```\n\n`chmod 400` makes the key readable only by you. SSH refuses to use keys with loose permissions \u2014 you'll get \"WARNING: UNPROTECTED PRIVATE KEY FILE\" and the connection gets rejected.\n\n### Step 5 \u2014 Terraform Init, Plan, Apply\n```bash\ncd terraform\nterraform init\n```\n\nThis downloads the AWS provider plugin. You'll see a `.terraform` folder appear. The `.terraform.lock.hcl` file locks the exact provider version \u2014 same idea as `requirements.txt` for Python.\n\n```bash\nterraform plan\n```\n\nThis is a dry run. Terraform shows exactly what it will create without actually doing anything. I always run this before apply \u2014 no surprises.\n\n```bash\nterraform apply\n```\n\nType `flask-key` for the key name, then `yes` to confirm.\n\n### Debugging \u2014 No Default Subnets\nFirst error I hit:\n```text\nError: creating EC2 Instance: No subnets found for the default VPC\n```\n\nMy AWS account had a default VPC but no default subnets inside it. Terraform couldn't place the EC2 anywhere.\n\n**Fix**:\n```bash\naws ec2 create-default-subnet --availability-zone ap-south-1a\n```\n\nRe-ran `terraform apply` and it worked.\n\n### Debugging \u2014 No Public IP\nApply succeeded but:\n```text\nec2_public_ip = \"\"\n```\n\nThe EC2 was created without a public IP, so I couldn't reach it from the internet.\n\n**Fix**: Added one line to the `aws_instance` block in `main.tf`:\n```hcl\nassociate_public_ip_address = true\n```\n\nRan `terraform apply` again. This time Terraform destroyed the old EC2 and created a new one \u2014 because public IP association can't be changed on a running instance. That's fine. That's Terraform doing the right thing.\n\nThis time:\n```text\nec2_public_ip = \"43.205.146.206\"\nssh_command = \"ssh -i ~/.ssh/flask-key.pem ubuntu@43.205.146.206\"\n```\n\n---\n\n## Phase 4 \u2014 Setting Up the EC2 Server\nSSH into the freshly created EC2:\n```bash\nssh -i ~/.ssh/flask-key.pem ubuntu@43.205.146.206\n```\n\n### Installing Docker\n```bash\nsudo apt update && sudo apt upgrade -y\nsudo apt install docker.io docker-compose-v2 -y\nsudo systemctl start docker\nsudo systemctl enable docker\nsudo usermod -aG docker ubuntu\nnewgrp docker\n```\n\n`systemctl enable` ensures Docker starts automatically on reboot. `usermod -aG docker ubuntu` adds ubuntu user to the docker group \u2014 otherwise every `docker` command needs `sudo`.\n\n### Installing Jenkins\nJenkins needs Java first:\n```bash\nsudo apt install openjdk-17-jdk -y\n```\n\nThen add the Jenkins repository and install:\n```bash\ncurl -fsSL https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key | sudo gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/jenkins.gpg > /dev/null\necho \"deb [signed-by=/etc/apt/trusted.gpg.d/jenkins.gpg] https://pkg.jenkins.io/debian-stable binary/\" | sudo tee /etc/apt/sources.list.d/jenkins.list > /dev/null\nsudo apt update --allow-insecure-repositories\nsudo apt install jenkins -y --allow-unauthenticated\n```\n\n*Honest note: The GPG key verification failed multiple times with various errors. I tried 4 different methods. Eventually I used `--allow-unauthenticated` to bypass it. For a production server I'd fix this properly \u2014 for a learning project on a temporary EC2, getting Jenkins installed was more important.*\n\nGive Jenkins Docker permissions \u2014 critical step:\n```bash\nsudo usermod -aG docker jenkins\nsudo systemctl restart jenkins\n```\n\nIf you skip this, Jenkins will fail every build with \"permission denied\" when it tries to run `docker build`.\n\n### Adding Swap Memory \u2014 Important\n`t2.micro` has 1GB RAM. Jenkins alone uses ~300MB. MySQL needs ~400MB. Flask needs ~100MB. That's already over 800MB on a 1GB machine.\n\nThe first time I ran the Jenkins pipeline, the EC2 completely froze. Couldn't SSH in, couldn't open Jenkins, nothing. The system ran out of memory and died.\n\nThe fix \u2014 swap space:\n\n```bash\nsudo fallocate -l 2G /swapfile\nsudo chmod 600 /swapfile\nsudo mkswap /swapfile\nsudo swapon /swapfile\necho '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab\nfree -h\n```\n\n```text\n               total        used        free\nMem:           954Mi       887Mi        72Mi\nSwap:          1.4Gi       93Mi        1.3Gi\n```\n\nSwap is disk space used as overflow RAM. Slower than real RAM but prevents the system from freezing when memory gets tight. Adding it to `/etc/fstab` makes it survive reboots.\n\n### Jenkins Initial Setup\nGet the initial admin password:\n```bash\nsudo cat /var/lib/jenkins/secrets/initialAdminPassword\n```\n\nOpen `http://<EC2-IP>:8080` in browser, paste the password, click \"Install suggested plugins\", create an admin user.\n\n---\n\n## Phase 5 \u2014 The Jenkins CI/CD Pipeline\n\n### The Jenkinsfile\nThis file lives in your repository and defines the pipeline. Jenkins reads it from GitHub on every build:\n\n```groovy\npipeline {\n    agent any\n\n    stages {\n        stage('Clone Code') {\n            steps {\n                git branch: 'main', url: 'https://github.com/shlokbam/flask-todo-app'\n            }\n        }\n\n        stage('Build Docker Image') {\n            steps {\n                sh 'docker build -t flask-todo-app:latest .'\n            }\n        }\n\n        stage('Deploy with Docker Compose') {\n            steps {\n                sh 'docker compose down || true'\n                sh 'docker compose up -d --build'\n            }\n        }\n\n        stage('Deployment Status') {\n            steps {\n                sh 'docker ps'\n                echo 'Deployment successful! App running on port 5000'\n            }\n        }\n    }\n}\n```\n\n4 stages, clean and simple:\n1. **Clone Code** \u2014 Jenkins pulls your latest GitHub code onto the EC2\n2. **Build Docker Image** \u2014 builds a fresh Flask image from your Dockerfile\n3. **Deploy with Docker Compose** \u2014 stops old containers, starts new ones\n4. **Deployment Status** \u2014 runs `docker ps` to confirm everything is running, then prints success\n\nThe `|| true` on `docker compose down` means \"if no containers are running, don't fail\" \u2014 handles the first run where there's nothing to stop.\n\n### Creating the Pipeline in Jenkins\n1. Dashboard \u2192 New Item \u2192 Pipeline \u2192 name it `flask-todo-pipeline`\n2. Scroll to Pipeline section\n3. Definition: **Pipeline script from SCM**\n4. SCM: **Git**\n5. Repository URL: your GitHub repo URL\n6. Branch: `*/main`\n7. Script Path: `Jenkinsfile`\n8. Save\n\n### The Build That Took 51 Minutes to Fail\nI clicked Build Now. Stage 1, 2, 3 went green. Stage 3 \"Deploy with Docker Compose\" started...\n\nAnd kept going. 10 minutes. 20 minutes. 40 minutes. 51 minutes. Still running.\n\nThe EC2 froze again. Jenkins UI stopped responding.\n\nThis time it wasn't memory \u2014 it was **disk space**.\n\n```text\nUsage of /: 99.8% of 6.71GB\n```\n\nThe default EC2 root volume is 8GB. Docker had downloaded the MySQL image (~600MB), the Python image, build cache, Jenkins files \u2014 and the disk was completely full. Docker couldn't finish pulling images. Jenkins couldn't write logs. Everything froze.\n\n**Fix \u2014 free up disk first**:\n```bash\ndocker system prune -af\nsudo rm -rf /var/lib/jenkins/workspace/flask-todo-pipeline\n```\n\n`docker system prune -af` removes all unused images, containers, and build cache. Freed 629MB instantly.\n\n**Fix \u2014 upgrade the disk via Terraform**:\nAdded this to `main.tf`:\n```hcl\nroot_block_device {\n  volume_size = 20\n}\n```\n\nRan `terraform apply`. Terraform expanded the volume to 20GB without destroying the EC2 \u2014 just modified the block device in place.\n\nBut AWS expanding the volume doesn't automatically tell the OS to use it. I had to do that manually:\n```bash\nsudo growpart /dev/xvda 1\nsudo resize2fs /dev/root\ndf -h\n```\n\n```text\nFilesystem      Size  Used Avail Use% Mounted on\n/dev/root        19G  6.2G   13G  34% /\n```\n\nFrom 0% free to 13GB free. That's more like it.\n\n### Finally \u2014 All Green\nClicked Build Now again. This time with 13GB disk free and swap active:\n\n```text\n\u2705 Clone Code              - 0.87s\n\u2705 Build Docker Image      - 5m 12s\n\u2705 Deploy with Compose     - 5m 48s\n\u2705 Deployment Status       - 25s\n```\n\nThe Deploy stage took 5 minutes because it was downloading the MySQL image for the first time. Every build after that is much faster \u2014 the image is cached.\n\n---\n\n## Phase 6 \u2014 The MySQL Connection Error\nI opened `http://<EC2-IP>:5000` expecting to see my app.\n\nConnection refused.\n\nChecked the containers:\n```bash\ndocker ps\n```\n\n```text\nflask-app   Restarting (1) 47 seconds ago\nmysql       Up 4 minutes (healthy)\n```\n\nMySQL was healthy. Flask was crashing and restarting in a loop.\n\nChecked Flask logs:\n```bash\ndocker logs flask-app\n```\n\n```text\nmysql.connector.errors.DatabaseError: 1130 (HY000): Host '172.18.0.3' is not allowed to connect to this MySQL server\n```\n\nThis one took me a while to understand.\n\nMySQL 8.0 by default only allows the root user to connect from `localhost`. But Flask is running in a separate container with IP `172.18.0.3`. From MySQL's perspective, that's a remote host \u2014 and root isn't allowed from remote hosts.\n\n**Fix**:\n```bash\ndocker exec -it mysql mysql -uroot -proot -e   \"GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' IDENTIFIED BY 'root';\"\n```\n\n`'root'@'%'` means \"allow root user to connect from any host\". The `%` is a wildcard.\n\nThen:\n```bash\ndocker compose down\ndocker compose up -d --build\ndocker ps\n```\n\nBoth containers running healthy. Opened `http://<EC2-IP>:5000`.\n\nIt worked. The app was live on AWS.\n\n---\n\n## Phase 7 \u2014 GitHub Webhook Automation\nThe pipeline works. But right now I have to click \"Build Now\" manually every time I push code. That defeats the purpose of CI/CD.\n\nWebhooks fix this.\n\n### What is a Webhook?\nA webhook is basically GitHub saying \"hey Jenkins, someone just pushed code\" \u2014 it sends an HTTP POST request to Jenkins every time a push happens. Jenkins receives it and automatically starts the pipeline.\n\n### Setting It Up\nIn GitHub:\n1. Repository \u2192 Settings \u2192 Webhooks \u2192 Add webhook\n2. Payload URL: `http://<EC2-IP>:8080/github-webhook/`\n3. Content type: `application/json`\n4. Events: \"Just the push event\"\n5. Save\n\nIn Jenkins:\n1. Pipeline \u2192 Configure\n2. Build Triggers \u2192 check **\"GitHub hook trigger for GITScm polling\"**\n3. Save\n\n### Testing It\nMade a small change \u2014 updated the footer text in `index.html`:\n```html\n<!-- changed from -->\n<footer>Deployed via Jenkins CI/CD Pipeline on AWS EC2</footer>\n\n<!-- changed to -->\n<footer>Auto-deployed via Jenkins CI/CD | Flask + Docker + AWS</footer>\n```\n\nCommitted and pushed:\n```bash\ngit add .\ngit commit -m \"update footer text\"\ngit push origin main\n```\n\nWithin seconds, Jenkins dashboard showed a new build starting automatically. No clicking. The pipeline ran all 4 stages and deployed. Refreshed the website \u2014 footer was updated.\n\nThat moment \u2014 seeing your code go from your laptop to a live server automatically \u2014 is genuinely satisfying. That's CI/CD working exactly as intended.\n\n---\n\n## Everything That Went Wrong \u2014 Summary\n\nHere's every problem I hit and how I fixed it, for quick reference:\n\n| Problem | Cause | Fix |\n| :--- | :--- | :--- |\n| **Port 3306 already in use** | Local MySQL using the port | Changed to `3307:3306` in `docker-compose.yml` |\n| **No subnets found** | New AWS account without default subnets | `aws ec2 create-default-subnet --availability-zone ap-south-1a` |\n| **No public IP on EC2** | Missing `associate_public_ip_address = true` in Terraform | Added the line, re-applied |\n| **EC2 froze completely** | t2.micro ran out of 1GB RAM | Added 2GB swap space |\n| **Jenkins GPG key error** | Key format incompatible with Ubuntu 24.04 | Used `--allow-unauthenticated` flag |\n| **Jenkins startup timeout** | Default 90s timeout too short for t2.micro | Increased to 300s via systemd override |\n| **Disk full, pipeline stuck** | 8GB default volume filled by Docker images | Upgraded to 20GB via Terraform, expanded filesystem |\n| **Flask can't connect to MySQL** | MySQL 8.0 restricts root to localhost | `GRANT ALL PRIVILEGES TO 'root'@'%'` |\n\nEvery single one of these errors taught me something. The disk space issue taught me about Docker layer caching. The MySQL permissions error taught me about MySQL's default security model. The RAM issue taught me about swap memory.\n\nYou learn more from things breaking than from things working.\n\n---\n\n## What I'd Do Differently\n1. **Use t2.medium instead of t2.micro** \u2014 t2.micro with 1GB RAM is genuinely painful for running Jenkins + Docker + MySQL. It works, but with swap memory and timeouts. 2GB RAM makes everything smoother.\n2. **Use environment variables for secrets** \u2014 The MySQL password is hardcoded as \"root\" in `docker-compose.yml`. In a real project I'd use AWS Secrets Manager or at minimum a `.env` file that's never committed to GitHub.\n3. **Add a `terraform.tfvars` file** \u2014 Instead of typing `flask-key` every time Terraform asks, I'd store it in a `terraform.tfvars` file: `key_name = \"flask-key\"`.\n4. **Use `user_data` in Terraform** \u2014 Terraform's `user_data` lets you run a shell script when EC2 first starts \u2014 so Docker and Jenkins get installed automatically as part of `terraform apply`. No manual SSH setup needed.\n\n---\n\n## Key Takeaways\n- **Docker networking** \u2014 containers communicate by service name, not `localhost`. This is one of those things that sounds obvious in theory and confuses everyone in practice.\n- **Infrastructure as Code** \u2014 once you understand Terraform, you'll never want to click through AWS console again. The ability to `terraform destroy` and `terraform apply` and get back exactly what you had is genuinely powerful.\n- **CI/CD is just automation** \u2014 it sounds complex but it's literally: code change \u2192 trigger \u2192 build \u2192 deploy. The magic is that each step is reliable and repeatable.\n- **Real projects break** \u2014 every tutorial shows you the happy path. Real projects hit disk limits, memory constraints, GPG key incompatibilities, and MySQL permission errors. Debugging these is the actual job.\n\n---\n\n## Resources\n- GitHub repo: `github.com/shlokbam/flask-todo-app`\n- Terraform AWS provider docs\n- Jenkins Pipeline syntax\n- Docker Compose reference\n",
                 content_type="BUILD",
                 category="DevOps",
                 reading_time="20 min read",
                 status="PUBLISHED",
                 featured=True,
                 published_at="2026-03-14",
-                github_repo="shlokbam/flask-todo-app"
+                cover_image="https://images.unsplash.com/photo-1516321318423-f06f85e504b3?q=80&w=1000&auto=format&fit=crop",
+                author="Shlok Bam",
+                project_slug=null,
+                github_repo="shlokbam/devops-pipeline-demo",
+                tags=tags_1
             )
-            db.add(devops_post)
-
-            # Assign tags
-            for t_name in ["DevOps", "Docker", "Jenkins", "Terraform", "AWS", "Flask", "MySQL"]:
-                tag = db.query(Tag).filter(Tag.name == t_name).first()
-                if not tag:
-                    tag = Tag(name=t_name, slug=t_name.lower().replace(" ", "-"))
-                    db.add(tag)
-        else:
-            existing.content = devops_content
-            existing.reading_time = "20 min read"
-            existing.published_at = "2026-03-14"
-
-        # Seed Article 2: DataLens
-        datalens_slug = "i-built-an-ai-data-analyst-app-from-scratch-here-s-how-i-taught-a-flask-app-to-think"
-        datalens_content = """![DataLens AI Data Analyst Banner](datalens-hero)
-
-# Before We Start — Why I Built This
-
-I've been getting into AI APIs lately. And like most people who just discovered that you can call a language model from Python in three lines of code, I immediately wanted to do something actually useful with it.
-
-The idea came from a real frustration. I had a sales CSV with 2,800 rows. I wanted to know which region was performing best, what the trend looked like over time, and whether there was a correlation between deal size and product line. I opened Excel, filtered, aggregated, made a pivot table, screamed internally, and gave up.
-
-What if I could just *ask* those questions in plain English and get an actual answer?
-
-So I built DataLens — an app where you upload any CSV, ask questions in natural language, get AI-powered insights, and get automatically generated charts. Then I kept going. Added user accounts. Saved conversation history. Added PDF export.
-
-This post covers the full build — every phase, every concept, every error that made me question my choices. If you're learning Flask, SQLAlchemy, or working with AI APIs, there's something here for you.
-
----
-
-## What I Built
-
-Here's what DataLens does:
-
-![DataLens Architecture Flow](datalens-flow)
-
-```text
-User uploads CSV
-    │
-    ▼
-Flask reads the file ➔ Pandas generates a text summary
-    │
-    ▼
-Groq API (Llama 3.3 70B) reads summary ➔ generates insight
-    │
-    ▼
-Groq suggests chart type + which columns to plot
-    │
-    ▼
-Matplotlib renders the chart ➔ PNG sent directly to browser
-    │
-    ▼
-SQLAlchemy saves the Q&A to database
-    │
-    ▼
-User can switch between past chats, export PDFs
-```
-
-Every question you ask is saved. Every analysis session is stored. You can close the tab, come back tomorrow, and pick up exactly where you left off. And when you're done, you can export the whole conversation — questions, AI answers, and charts — as a PDF.
-
-### Tech Stack
-
-| What | Tool |
-| :--- | :--- |
-| **Web Framework** | Python Flask |
-| **Database** | SQLAlchemy + SQLite |
-| **Auth** | Flask-Login |
-| **AI** | Groq API (Llama 3.3 70B) |
-| **Data Processing** | Pandas |
-| **Charting** | Matplotlib |
-| **PDF Generation** | ReportLab |
-| **Frontend** | Vanilla JS + CSS |
-
-I built this in 4 phases. Let me walk you through each one.
-
----
-
-## Phase A — SQLAlchemy + Database Design
-
-The first decision was the data model. Three tables:
-
-- **User** — email and hashed password
-- **Chat** — each CSV upload creates a Chat (stores filename and path)
-- **Message** — each Q&A exchange is a Message inside a Chat
-
-This is a classic one-to-many relationship:
-- One User ➔ many Chats
-- One Chat ➔ many Messages
-
-Here's how that looks in SQLAlchemy:
-
-```python
-class User(db.Model, UserMixin):
-    __tablename__ = 'users'
-    id            = db.Column(db.Integer, primary_key=True)
-    email         = db.Column(db.String(120), unique=True, nullable=False)
-    password_hash = db.Column(db.String(256), nullable=False)
-    chats         = db.relationship('Chat', backref='user', lazy=True, cascade='all, delete-orphan')
-
-class Chat(db.Model):
-    __tablename__ = 'chats'
-    id           = db.Column(db.Integer, primary_key=True)
-    name         = db.Column(db.String(200), nullable=False)
-    csv_path     = db.Column(db.String(500))
-    csv_filename = db.Column(db.String(200))
-    user_id      = db.Column(db.Integer, db.ForeignKey('users.id'))
-    messages     = db.relationship('Message', backref='chat', lazy=True, cascade='all, delete-orphan')
-
-class Message(db.Model):
-    __tablename__ = 'messages'
-    id          = db.Column(db.Integer, primary_key=True)
-    chat_id     = db.Column(db.Integer, db.ForeignKey('chats.id'))
-    question    = db.Column(db.Text, nullable=False)
-    answer      = db.Column(db.Text, nullable=False)
-    chart_type  = db.Column(db.String(50))
-    chart_x_col = db.Column(db.String(200))
-    chart_y_col = db.Column(db.String(200))
-```
-
-A few things here that are worth understanding:
-
-- `cascade='all, delete-orphan'` — when you delete a User, all their Chats get deleted automatically. When you delete a Chat, all its Messages go too. Without this, you'd have orphaned rows sitting in the database forever.
-- `backref='user'` — this creates a reverse relationship. Once this is set, you can do `chat.user` to get the User who owns that chat, without writing any extra query. SQLAlchemy handles it.
-- `UserMixin` — Flask-Login needs certain methods on your User model (`is_authenticated`, `get_id()`, etc.). `UserMixin` provides all of these for free. You just inherit from it.
-
-No separate migration tool needed for this project. Just `db.create_all()` inside the app context on startup, and all three tables get created automatically.
-
----
-
-## Phase B — Flask Blueprints + Auth
-
-This is where I learned what Blueprints actually are, not just theoretically.
-
-A Blueprint is Flask's way of splitting a large app into smaller, reusable pieces. Instead of dumping everything in `app.py`, you put auth-related routes in `auth.py` as a Blueprint and register it in `app.py`. The routes behave identically — they're just organized.
-
-```python
-# auth.py
-from flask import Blueprint, render_template, request, redirect, url_for, flash
-from flask_login import login_user, logout_user, login_required, current_user
-
-auth_bp = Blueprint('auth', __name__)
-
-@auth_bp.route('/login', methods=['GET', 'POST'])
-def login():
-    if current_user.is_authenticated:
-        return redirect(url_for('index'))
-        
-    if request.method == 'POST':
-        email    = request.form.get('email', '').strip().lower()
-        password = request.form.get('password', '')
-        
-        user = User.query.filter_by(email=email).first()
-        if not user or not user.check_password(password):
-            flash('Invalid email or password.', 'error')
-            return render_template('login.html')
-            
-        login_user(user, remember=True)
-        return redirect(url_for('index'))
-        
-    return render_template('login.html')
-```
-
-```python
-# app.py
-from auth import auth_bp
-app.register_blueprint(auth_bp)
-```
-
-That's it. The route lives at `/login` and you reference it anywhere as `url_for('auth.login')`. The `auth.` prefix is the Blueprint name. One of those things where once you see it, it clicks immediately.
-
-### Password Hashing Error & Fix
-
-I ran into a compatibility issue here. Werkzeug 2.x defaults to `scrypt` for hashing. But `scrypt` requires OpenSSL compiled with scrypt support, and my Python 3.9 environment didn't have it:
-
-```text
-AttributeError: module 'hashlib' has no attribute 'scrypt'
-```
-
-Fix was simple — explicitly specify `pbkdf2:sha256`:
-
-```python
-def set_password(self, password):
-    self.password_hash = generate_password_hash(password, method='pbkdf2:sha256')
-```
-
-`pbkdf2:sha256` is NIST-approved, used by production apps everywhere, and works on all Python versions. Perfectly fine security-wise.
-
-### Protecting Routes
-
-One decorator and a route is fully protected:
-
-```python
-@app.route('/upload', methods=['POST'])
-@login_required
-def upload_file():
-    ...
-```
-
-Unauthenticated requests get redirected to the login page automatically. Just make sure you tell Flask-Login where your login page is:
-
-```python
-login_manager.login_view = 'auth.login'
-```
-
----
-
-## Phase C — Multi-Chat Routing
-
-Here's where it got interesting.
-
-The original version of the app was stateless — you uploaded a file, asked questions, everything lived in the Flask session (basically a browser cookie). Close the tab and it was gone. Not great.
-
-Phase C converts it to full persistence. Every upload creates a Chat row. Every question creates a Message row. The user's sidebar shows all their past analyses.
-
-```python
-@app.route('/upload', methods=['POST'])
-@login_required
-def upload_file():
-    file = request.files['file']
-    filename = secure_filename(file.filename)
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    file.save(filepath)
-
-    # Phase C: create a Chat record in the database
-    chat = Chat(
-        name=filename.replace('.csv', '').replace('_', ' ').title(),
-        csv_path=filepath,
-        csv_filename=filename,
-        user_id=current_user.id
-    )
-    db.session.add(chat)
-    db.session.commit()
-
-    session['filepath'] = filepath
-    session['chat_id'] = chat.id
-    return jsonify({"status": "success"})
-```
-
-And in the `/ask` route, after getting the AI response:
-
-```python
-msg = Message(
-    chat_id     = session.get('chat_id'),
-    question    = user_question,
-    answer      = insight,
-    chart_type  = chart_type,
-    chart_x_col = chart_column_suggestion.get('x'),
-    chart_y_col = chart_column_suggestion.get('y'),
-)
-db.session.add(msg)
-db.session.commit()
-```
-
-We save the chart metadata too — not the image bytes, because charts can be regenerated from the original CSV later. This matters a lot for the PDF export in Phase D.
-
-The chat-switching API has three routes:
-- `GET /chats` — list all chats for current user
-- `GET /chats/<id>` — get all messages for one chat
-- `POST /chats/<id>/activate` — restore a chat into the session
-- `DELETE /chats/<id>` — delete chat + cascade messages
-
-### Legacy API Warning Fix
-
-One thing I discovered: `db.session.get(User, user_id)` is the correct way to look up by primary key in SQLAlchemy 2.x. The old `User.query.get(id)` syntax still works but fires a deprecation warning on every request:
-
-```text
-LegacyAPIWarning: The Query.get() method is considered legacy
-```
-
-Changed it in the Flask-Login user loader and the warnings went away.
-
----
-
-## Phase D — PDF Export with ReportLab
-
-This was the most satisfying phase to build.
-
-ReportLab is a Python library that gives you full programmatic control over PDF layout. No templates, no HTML-to-PDF conversion — you build every element from scratch in Python code.
-
-The mental model is simple: ReportLab has a `story` — a list of `Flowable` objects that get laid out onto pages in order. You build the list, call `doc.build(story)`, and the library handles page breaks, margins, and layout.
-
-```python
-from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer,
-    Image, HRFlowable, PageBreak
-)
-
-buf = io.BytesIO()
-
-doc = SimpleDocTemplate(buf, pagesize=A4,
-                        leftMargin=25*mm, rightMargin=25*mm,
-                        topMargin=20*mm, bottomMargin=20*mm)
-
-story = []
-
-# Title page
-story.append(Spacer(1, 30*mm))
-story.append(Paragraph('DataLens', title_style))
-story.append(Paragraph(chat.name, subtitle_style))
-story.append(HRFlowable(width='100%', thickness=1, color=accent_color))
-story.append(PageBreak())
-
-# Q&A sections
-for msg in messages:
-    story.append(Paragraph(msg.question, question_style))
-    story.append(Paragraph(msg.answer, answer_style))
-
-    if msg.chart_type != 'none':
-        chart_buf = regenerate_chart(msg)
-        story.append(Image(chart_buf, ...))
-
-doc.build(story)
-buf.seek(0)
-return buf
-```
-
-The charts are re-generated on-the-fly — I pass a `chart_generator` closure into `build_pdf()` that reads the original CSV and rerenders the chart as a PNG. This is clean because no image bytes are stored in the database.
-
-The export route itself is simple:
-
-```python
-@app.route('/export/<int:chat_id>')
-@login_required
-def export_pdf(chat_id):
-    chat = Chat.query.filter_by(id=chat_id, user_id=current_user.id).first_or_404()
-    pdf_buf = build_pdf(chat, list(chat.messages), chart_generator)
-    
-    return send_file(pdf_buf,
-                     mimetype='application/pdf',
-                     as_attachment=True,
-                     download_name=f'datalens_{chat.name.lower().replace(" ", "_")}.pdf')
-```
-
-`as_attachment=True` adds `Content-Disposition: attachment` to the response — that's the HTTP header that tells the browser to download the file instead of trying to display it inline.
-
----
-
-## The AI Part — How It Actually Works
-
-Most of the "magic" is in `gemini_helper.py` (badly named — it actually uses the Groq API, not Google Gemini, but I kept the filename to avoid breaking imports).
-
-The key insight: I **never send the full CSV to the AI**. Sending 2,800 rows to a language model would blow past the context limit, cost tokens, and be slow. Instead, I pre-process the CSV into a compact text summary:
-
-```text
-Shape: 2823 rows × 25 columns
-
-Column Types:
-  Numeric: QUANTITYORDERED, PRICEEACH, SALES, MSRP
-  Categorical: STATUS, PRODUCTLINE, COUNTRY, TERRITORY
-
-Statistics (numeric columns):
-  SALES: mean=3553.89, std=1841.87, min=482.13, max=14082.80
-
-Top Values:
-  PRODUCTLINE: Classic Cars (967), Vintage Cars (607), Motorcycles (331)
-  COUNTRY: USA (1004), Spain (342), France (314)
-
-Missing Values: None
-
-Sample Rows:
-ORDERNUMBER  SALES  PRODUCTLINE  COUNTRY
-10107        2871   Motorcycles  USA
-...
-```
-
-This summary — not the raw CSV — gets sent to the AI. It's maybe 800 tokens vs. tens of thousands. The model can answer most analytical questions accurately from this structured summary.
-
-Three separate AI calls happen for each question:
-
-1. `get_ai_insight()` — the main call. Gets the text answer. Includes the last 5 exchanges as context so follow-up questions work properly.
-2. `suggest_chart_type()` — a separate call with `temperature=0` (deterministic). Returns exactly one word: `bar`, `line`, `scatter`, `histogram`, `pie`, or `none`. Low temperature because I need a parseable response, not creativity.
-3. `suggest_chart_columns()` — another separate call. Returns JSON with `x` and `y` column names. I parse this, validate against the actual column list, and fall back to sensible defaults if the AI hallucinates a column name that doesn't exist.
-
-Why three calls instead of one? When I tried to get everything in one call, the AI would sometimes get distracted and return malformed JSON, or mix the chart suggestion into the text answer. Separating concerns made each call simpler and more reliable.
-
----
-
-## Everything That Went Wrong — Summary
-
-| Problem | Cause | Fix |
-| :--- | :--- | :--- |
-| **`hashlib has no attribute 'scrypt'`** | Python 3.9 missing scrypt support | Explicitly use `method='pbkdf2:sha256'` in `generate_password_hash` |
-| **Upload returning 500** | CSV with non-UTF-8 characters | `try: pd.read_csv(f) except UnicodeDecodeError: pd.read_csv(f, encoding='latin1')` |
-| **Data preview table blank** | Pandas `NaN` serializes as bare `NaN` — invalid JSON | `df.where(pd.notnull(df), None)` before `to_dict()` |
-| **`LegacyAPIWarning` on every request** | `User.query.get()` deprecated in SQLAlchemy 2.x | Replace with `db.session.get(User, user_id)` |
-| **Auth routes returning 404** | Thought Blueprint was at `/auth/login` | Routes are at `/login` — no prefix. `url_for('auth.login')` still works |
-| **Chart generator silent failure in PDF** | CSV no longer on disk when exporting old chat | Added early check `if not os.path.exists(chat.csv_path)` before rendering |
-
-The `NaN` one cost me the most time. The symptom was completely confusing — server returned 200, JavaScript got a response, but the table was blank. Silent failure. Turned out `response.json()` was throwing a parse error because `NaN` is not valid JSON (it's `null` in JSON), and the whole preview section was quietly dying in a catch block. Classic.
-
----
-
-## What I'd Do Differently
-
-1. **Proper file storage** — Right now CSVs are saved to a local `uploads/` folder. If the server restarts, old chat sessions can't reload their charts because the files are gone. In production I'd use S3 — store the CSV path as an S3 key, not a local filesystem path.
-2. **Background jobs for AI calls** — Right now the `/ask` endpoint blocks until the AI responds — usually 3–8 seconds. A better pattern is to return a job ID immediately, process the AI call in a background worker (Celery, or even a simple thread), and have the frontend poll or use WebSockets for the result. Feels much faster.
-3. **Streaming AI responses** — The Groq API supports streaming responses — you can start sending tokens to the frontend as they arrive, exactly like ChatGPT does. The current setup waits for the full response before returning. Streaming would feel dramatically faster even if total time is the same.
-4. **PDF charts as stored images** — Right now the PDF export re-generates charts from the original CSV. If the CSV is gone, charts are skipped silently. Better to store the chart image in S3 alongside the CSV, and reference it directly in the PDF.
-
----
-
-## Key Takeaways
-
-- **Send summaries to AI, not raw data.** Structured text summaries are more token-efficient, equally informative for analysis, and let you control exactly what context the model has. This is the pattern most production data AI tools use.
-- **Separate your AI calls.** One call for the text answer, a separate call for chart type, another for column selection. Each prompt is simpler, outputs are more parseable, and failures are isolated.
-- **SQLAlchemy's cascades are powerful.** `cascade='all, delete-orphan'` One time and your entire data hierarchy cleans up automatically. No manual delete queries across tables.
-- **Flask Blueprints are just an organisation.** They're not especially complex — they're a way to split a growing `app.py` list into logical groups. Start using them before your app file gets too big, not after.
-- **`NaN` is not `null`**. In JSON, missing values are `null`. Python's `float('nan')` serializes to bare `NaN` which browsers can't parse. Always sanitize DataFrames before JSONifying them.
-
----
-
-## Resources
-
-- GitHub repo: `github.com/shlokbam/ai-data-analyst`
-- Groq API docs
-- Flask-Login documentation
-- SQLAlchemy ORM tutorial
-- ReportLab user guide
-"""
-        existing_datalens = db.query(Post).filter(Post.slug == datalens_slug).first()
-        if not existing_datalens:
-            datalens_post = Post(
-                title="I Built an AI Data Analyst App from Scratch — Here's How I Taught a Flask App to Think",
-                slug=datalens_slug,
-                excerpt="A full walkthrough of building DataLens — CSV uploads, Groq/Llama 3.3 70B AI insights, auto-generated charts, user auth, persistent chat history, and PDF export.",
-                content=datalens_content,
+            db.add(post_1)
+            db.commit()
+
+        # Seed i-built-an-ai-data-analyst-app-from-scratch-here-s-how-i-taught-a-flask-app-to-think
+        existing_2 = db.query(Post).filter(Post.slug == "i-built-an-ai-data-analyst-app-from-scratch-here-s-how-i-taught-a-flask-app-to-think").first()
+        if not existing_2:
+        tags_2 = []
+        t_devops = db.query(Tag).filter(Tag.name == "DevOps").first()
+        if not t_devops:
+            t_devops = Tag(name="DevOps", slug="devops")
+            db.add(t_devops)
+            db.commit()
+        tags_2.append(t_devops)
+        t_docker = db.query(Tag).filter(Tag.name == "Docker").first()
+        if not t_docker:
+            t_docker = Tag(name="Docker", slug="docker")
+            db.add(t_docker)
+            db.commit()
+        tags_2.append(t_docker)
+        t_jenkins = db.query(Tag).filter(Tag.name == "Jenkins").first()
+        if not t_jenkins:
+            t_jenkins = Tag(name="Jenkins", slug="jenkins")
+            db.add(t_jenkins)
+            db.commit()
+        tags_2.append(t_jenkins)
+        t_fastapi = db.query(Tag).filter(Tag.name == "FastAPI").first()
+        if not t_fastapi:
+            t_fastapi = Tag(name="FastAPI", slug="fastapi")
+            db.add(t_fastapi)
+            db.commit()
+        tags_2.append(t_fastapi)
+        t_react = db.query(Tag).filter(Tag.name == "React").first()
+        if not t_react:
+            t_react = Tag(name="React", slug="react")
+            db.add(t_react)
+            db.commit()
+        tags_2.append(t_react)
+
+            post_2 = Post(
+                title="I Built an AI Data Analyst App from Scratch \u2014 Here's How I Taught a Flask App to Think",
+                slug="i-built-an-ai-data-analyst-app-from-scratch-here-s-how-i-taught-a-flask-app-to-think",
+                excerpt="A full walkthrough of building DataLens \u2014 CSV uploads, Groq/Llama 3.3 70B AI insights, auto-generated charts, user auth, persistent chat history, and PDF export.",
+                content="![DataLens AI Data Analyst Banner](datalens-hero)\n\n# Before We Start \u2014 Why I Built This\n\nI've been getting into AI APIs lately. And like most people who just discovered that you can call a language model from Python in three lines of code, I immediately wanted to do something actually useful with it.\n\nThe idea came from a real frustration. I had a sales CSV with 2,800 rows. I wanted to know which region was performing best, what the trend looked like over time, and whether there was a correlation between deal size and product line. I opened Excel, filtered, aggregated, made a pivot table, screamed internally, and gave up.\n\nWhat if I could just *ask* those questions in plain English and get an actual answer?\n\nSo I built DataLens \u2014 an app where you upload any CSV, ask questions in natural language, get AI-powered insights, and get automatically generated charts. Then I kept going. Added user accounts. Saved conversation history. Added PDF export.\n\nThis post covers the full build \u2014 every phase, every concept, every error that made me question my choices. If you're learning Flask, SQLAlchemy, or working with AI APIs, there's something here for you.\n\n---\n\n## What I Built\n\nHere's what DataLens does:\n\n![DataLens Architecture Flow](datalens-flow)\n\n```text\nUser uploads CSV\n    \u2502\n    \u25bc\nFlask reads the file \u2794 Pandas generates a text summary\n    \u2502\n    \u25bc\nGroq API (Llama 3.3 70B) reads summary \u2794 generates insight\n    \u2502\n    \u25bc\nGroq suggests chart type + which columns to plot\n    \u2502\n    \u25bc\nMatplotlib renders the chart \u2794 PNG sent directly to browser\n    \u2502\n    \u25bc\nSQLAlchemy saves the Q&A to database\n    \u2502\n    \u25bc\nUser can switch between past chats, export PDFs\n```\n\nEvery question you ask is saved. Every analysis session is stored. You can close the tab, come back tomorrow, and pick up exactly where you left off. And when you're done, you can export the whole conversation \u2014 questions, AI answers, and charts \u2014 as a PDF.\n\n### Tech Stack\n\n| What | Tool |\n| :--- | :--- |\n| **Web Framework** | Python Flask |\n| **Database** | SQLAlchemy + SQLite |\n| **Auth** | Flask-Login |\n| **AI** | Groq API (Llama 3.3 70B) |\n| **Data Processing** | Pandas |\n| **Charting** | Matplotlib |\n| **PDF Generation** | ReportLab |\n| **Frontend** | Vanilla JS + CSS |\n\nI built this in 4 phases. Let me walk you through each one.\n\n---\n\n## Phase A \u2014 SQLAlchemy + Database Design\n\nThe first decision was the data model. Three tables:\n\n- **User** \u2014 email and hashed password\n- **Chat** \u2014 each CSV upload creates a Chat (stores filename and path)\n- **Message** \u2014 each Q&A exchange is a Message inside a Chat\n\nThis is a classic one-to-many relationship:\n- One User \u2794 many Chats\n- One Chat \u2794 many Messages\n\nHere's how that looks in SQLAlchemy:\n\n```python\nclass User(db.Model, UserMixin):\n    __tablename__ = 'users'\n    id            = db.Column(db.Integer, primary_key=True)\n    email         = db.Column(db.String(120), unique=True, nullable=False)\n    password_hash = db.Column(db.String(256), nullable=False)\n    chats         = db.relationship('Chat', backref='user', lazy=True, cascade='all, delete-orphan')\n\nclass Chat(db.Model):\n    __tablename__ = 'chats'\n    id           = db.Column(db.Integer, primary_key=True)\n    name         = db.Column(db.String(200), nullable=False)\n    csv_path     = db.Column(db.String(500))\n    csv_filename = db.Column(db.String(200))\n    user_id      = db.Column(db.Integer, db.ForeignKey('users.id'))\n    messages     = db.relationship('Message', backref='chat', lazy=True, cascade='all, delete-orphan')\n\nclass Message(db.Model):\n    __tablename__ = 'messages'\n    id          = db.Column(db.Integer, primary_key=True)\n    chat_id     = db.Column(db.Integer, db.ForeignKey('chats.id'))\n    question    = db.Column(db.Text, nullable=False)\n    answer      = db.Column(db.Text, nullable=False)\n    chart_type  = db.Column(db.String(50))\n    chart_x_col = db.Column(db.String(200))\n    chart_y_col = db.Column(db.String(200))\n```\n\nA few things here that are worth understanding:\n\n- `cascade='all, delete-orphan'` \u2014 when you delete a User, all their Chats get deleted automatically. When you delete a Chat, all its Messages go too. Without this, you'd have orphaned rows sitting in the database forever.\n- `backref='user'` \u2014 this creates a reverse relationship. Once this is set, you can do `chat.user` to get the User who owns that chat, without writing any extra query. SQLAlchemy handles it.\n- `UserMixin` \u2014 Flask-Login needs certain methods on your User model (`is_authenticated`, `get_id()`, etc.). `UserMixin` provides all of these for free. You just inherit from it.\n\nNo separate migration tool needed for this project. Just `db.create_all()` inside the app context on startup, and all three tables get created automatically.\n\n---\n\n## Phase B \u2014 Flask Blueprints + Auth\n\nThis is where I learned what Blueprints actually are, not just theoretically.\n\nA Blueprint is Flask's way of splitting a large app into smaller, reusable pieces. Instead of dumping everything in `app.py`, you put auth-related routes in `auth.py` as a Blueprint and register it in `app.py`. The routes behave identically \u2014 they're just organized.\n\n```python\n# auth.py\nfrom flask import Blueprint, render_template, request, redirect, url_for, flash\nfrom flask_login import login_user, logout_user, login_required, current_user\n\nauth_bp = Blueprint('auth', __name__)\n\n@auth_bp.route('/login', methods=['GET', 'POST'])\ndef login():\n    if current_user.is_authenticated:\n        return redirect(url_for('index'))\n        \n    if request.method == 'POST':\n        email    = request.form.get('email', '').strip().lower()\n        password = request.form.get('password', '')\n        \n        user = User.query.filter_by(email=email).first()\n        if not user or not user.check_password(password):\n            flash('Invalid email or password.', 'error')\n            return render_template('login.html')\n            \n        login_user(user, remember=True)\n        return redirect(url_for('index'))\n        \n    return render_template('login.html')\n```\n\n```python\n# app.py\nfrom auth import auth_bp\napp.register_blueprint(auth_bp)\n```\n\nThat's it. The route lives at `/login` and you reference it anywhere as `url_for('auth.login')`. The `auth.` prefix is the Blueprint name. One of those things where once you see it, it clicks immediately.\n\n### Password Hashing Error & Fix\n\nI ran into a compatibility issue here. Werkzeug 2.x defaults to `scrypt` for hashing. But `scrypt` requires OpenSSL compiled with scrypt support, and my Python 3.9 environment didn't have it:\n\n```text\nAttributeError: module 'hashlib' has no attribute 'scrypt'\n```\n\nFix was simple \u2014 explicitly specify `pbkdf2:sha256`:\n\n```python\ndef set_password(self, password):\n    self.password_hash = generate_password_hash(password, method='pbkdf2:sha256')\n```\n\n`pbkdf2:sha256` is NIST-approved, used by production apps everywhere, and works on all Python versions. Perfectly fine security-wise.\n\n### Protecting Routes\n\nOne decorator and a route is fully protected:\n\n```python\n@app.route('/upload', methods=['POST'])\n@login_required\ndef upload_file():\n    ...\n```\n\nUnauthenticated requests get redirected to the login page automatically. Just make sure you tell Flask-Login where your login page is:\n\n```python\nlogin_manager.login_view = 'auth.login'\n```\n\n---\n\n## Phase C \u2014 Multi-Chat Routing\n\nHere's where it got interesting.\n\nThe original version of the app was stateless \u2014 you uploaded a file, asked questions, everything lived in the Flask session (basically a browser cookie). Close the tab and it was gone. Not great.\n\nPhase C converts it to full persistence. Every upload creates a Chat row. Every question creates a Message row. The user's sidebar shows all their past analyses.\n\n```python\n@app.route('/upload', methods=['POST'])\n@login_required\ndef upload_file():\n    file = request.files['file']\n    filename = secure_filename(file.filename)\n    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)\n    file.save(filepath)\n\n    # Phase C: create a Chat record in the database\n    chat = Chat(\n        name=filename.replace('.csv', '').replace('_', ' ').title(),\n        csv_path=filepath,\n        csv_filename=filename,\n        user_id=current_user.id\n    )\n    db.session.add(chat)\n    db.session.commit()\n\n    session['filepath'] = filepath\n    session['chat_id'] = chat.id\n    return jsonify({\"status\": \"success\"})\n```\n\nAnd in the `/ask` route, after getting the AI response:\n\n```python\nmsg = Message(\n    chat_id     = session.get('chat_id'),\n    question    = user_question,\n    answer      = insight,\n    chart_type  = chart_type,\n    chart_x_col = chart_column_suggestion.get('x'),\n    chart_y_col = chart_column_suggestion.get('y'),\n)\ndb.session.add(msg)\ndb.session.commit()\n```\n\nWe save the chart metadata too \u2014 not the image bytes, because charts can be regenerated from the original CSV later. This matters a lot for the PDF export in Phase D.\n\nThe chat-switching API has three routes:\n- `GET /chats` \u2014 list all chats for current user\n- `GET /chats/<id>` \u2014 get all messages for one chat\n- `POST /chats/<id>/activate` \u2014 restore a chat into the session\n- `DELETE /chats/<id>` \u2014 delete chat + cascade messages\n\n### Legacy API Warning Fix\n\nOne thing I discovered: `db.session.get(User, user_id)` is the correct way to look up by primary key in SQLAlchemy 2.x. The old `User.query.get(id)` syntax still works but fires a deprecation warning on every request:\n\n```text\nLegacyAPIWarning: The Query.get() method is considered legacy\n```\n\nChanged it in the Flask-Login user loader and the warnings went away.\n\n---\n\n## Phase D \u2014 PDF Export with ReportLab\n\nThis was the most satisfying phase to build.\n\nReportLab is a Python library that gives you full programmatic control over PDF layout. No templates, no HTML-to-PDF conversion \u2014 you build every element from scratch in Python code.\n\nThe mental model is simple: ReportLab has a `story` \u2014 a list of `Flowable` objects that get laid out onto pages in order. You build the list, call `doc.build(story)`, and the library handles page breaks, margins, and layout.\n\n```python\nfrom reportlab.platypus import (\n    SimpleDocTemplate, Paragraph, Spacer,\n    Image, HRFlowable, PageBreak\n)\n\nbuf = io.BytesIO()\n\ndoc = SimpleDocTemplate(buf, pagesize=A4,\n                        leftMargin=25*mm, rightMargin=25*mm,\n                        topMargin=20*mm, bottomMargin=20*mm)\n\nstory = []\n\n# Title page\nstory.append(Spacer(1, 30*mm))\nstory.append(Paragraph('DataLens', title_style))\nstory.append(Paragraph(chat.name, subtitle_style))\nstory.append(HRFlowable(width='100%', thickness=1, color=accent_color))\nstory.append(PageBreak())\n\n# Q&A sections\nfor msg in messages:\n    story.append(Paragraph(msg.question, question_style))\n    story.append(Paragraph(msg.answer, answer_style))\n\n    if msg.chart_type != 'none':\n        chart_buf = regenerate_chart(msg)\n        story.append(Image(chart_buf, ...))\n\ndoc.build(story)\nbuf.seek(0)\nreturn buf\n```\n\nThe charts are re-generated on-the-fly \u2014 I pass a `chart_generator` closure into `build_pdf()` that reads the original CSV and rerenders the chart as a PNG. This is clean because no image bytes are stored in the database.\n\nThe export route itself is simple:\n\n```python\n@app.route('/export/<int:chat_id>')\n@login_required\ndef export_pdf(chat_id):\n    chat = Chat.query.filter_by(id=chat_id, user_id=current_user.id).first_or_404()\n    pdf_buf = build_pdf(chat, list(chat.messages), chart_generator)\n    \n    return send_file(pdf_buf,\n                     mimetype='application/pdf',\n                     as_attachment=True,\n                     download_name=f'datalens_{chat.name.lower().replace(\" \", \"_\")}.pdf')\n```\n\n`as_attachment=True` adds `Content-Disposition: attachment` to the response \u2014 that's the HTTP header that tells the browser to download the file instead of trying to display it inline.\n\n---\n\n## The AI Part \u2014 How It Actually Works\n\nMost of the \"magic\" is in `gemini_helper.py` (badly named \u2014 it actually uses the Groq API, not Google Gemini, but I kept the filename to avoid breaking imports).\n\nThe key insight: I **never send the full CSV to the AI**. Sending 2,800 rows to a language model would blow past the context limit, cost tokens, and be slow. Instead, I pre-process the CSV into a compact text summary:\n\n```text\nShape: 2823 rows \u00d7 25 columns\n\nColumn Types:\n  Numeric: QUANTITYORDERED, PRICEEACH, SALES, MSRP\n  Categorical: STATUS, PRODUCTLINE, COUNTRY, TERRITORY\n\nStatistics (numeric columns):\n  SALES: mean=3553.89, std=1841.87, min=482.13, max=14082.80\n\nTop Values:\n  PRODUCTLINE: Classic Cars (967), Vintage Cars (607), Motorcycles (331)\n  COUNTRY: USA (1004), Spain (342), France (314)\n\nMissing Values: None\n\nSample Rows:\nORDERNUMBER  SALES  PRODUCTLINE  COUNTRY\n10107        2871   Motorcycles  USA\n...\n```\n\nThis summary \u2014 not the raw CSV \u2014 gets sent to the AI. It's maybe 800 tokens vs. tens of thousands. The model can answer most analytical questions accurately from this structured summary.\n\nThree separate AI calls happen for each question:\n\n1. `get_ai_insight()` \u2014 the main call. Gets the text answer. Includes the last 5 exchanges as context so follow-up questions work properly.\n2. `suggest_chart_type()` \u2014 a separate call with `temperature=0` (deterministic). Returns exactly one word: `bar`, `line`, `scatter`, `histogram`, `pie`, or `none`. Low temperature because I need a parseable response, not creativity.\n3. `suggest_chart_columns()` \u2014 another separate call. Returns JSON with `x` and `y` column names. I parse this, validate against the actual column list, and fall back to sensible defaults if the AI hallucinates a column name that doesn't exist.\n\nWhy three calls instead of one? When I tried to get everything in one call, the AI would sometimes get distracted and return malformed JSON, or mix the chart suggestion into the text answer. Separating concerns made each call simpler and more reliable.\n\n---\n\n## Everything That Went Wrong \u2014 Summary\n\n| Problem | Cause | Fix |\n| :--- | :--- | :--- |\n| **`hashlib has no attribute 'scrypt'`** | Python 3.9 missing scrypt support | Explicitly use `method='pbkdf2:sha256'` in `generate_password_hash` |\n| **Upload returning 500** | CSV with non-UTF-8 characters | `try: pd.read_csv(f) except UnicodeDecodeError: pd.read_csv(f, encoding='latin1')` |\n| **Data preview table blank** | Pandas `NaN` serializes as bare `NaN` \u2014 invalid JSON | `df.where(pd.notnull(df), None)` before `to_dict()` |\n| **`LegacyAPIWarning` on every request** | `User.query.get()` deprecated in SQLAlchemy 2.x | Replace with `db.session.get(User, user_id)` |\n| **Auth routes returning 404** | Thought Blueprint was at `/auth/login` | Routes are at `/login` \u2014 no prefix. `url_for('auth.login')` still works |\n| **Chart generator silent failure in PDF** | CSV no longer on disk when exporting old chat | Added early check `if not os.path.exists(chat.csv_path)` before rendering |\n\nThe `NaN` one cost me the most time. The symptom was completely confusing \u2014 server returned 200, JavaScript got a response, but the table was blank. Silent failure. Turned out `response.json()` was throwing a parse error because `NaN` is not valid JSON (it's `null` in JSON), and the whole preview section was quietly dying in a catch block. Classic.\n\n---\n\n## What I'd Do Differently\n\n1. **Proper file storage** \u2014 Right now CSVs are saved to a local `uploads/` folder. If the server restarts, old chat sessions can't reload their charts because the files are gone. In production I'd use S3 \u2014 store the CSV path as an S3 key, not a local filesystem path.\n2. **Background jobs for AI calls** \u2014 Right now the `/ask` endpoint blocks until the AI responds \u2014 usually 3\u20138 seconds. A better pattern is to return a job ID immediately, process the AI call in a background worker (Celery, or even a simple thread), and have the frontend poll or use WebSockets for the result. Feels much faster.\n3. **Streaming AI responses** \u2014 The Groq API supports streaming responses \u2014 you can start sending tokens to the frontend as they arrive, exactly like ChatGPT does. The current setup waits for the full response before returning. Streaming would feel dramatically faster even if total time is the same.\n4. **PDF charts as stored images** \u2014 Right now the PDF export re-generates charts from the original CSV. If the CSV is gone, charts are skipped silently. Better to store the chart image in S3 alongside the CSV, and reference it directly in the PDF.\n\n---\n\n## Key Takeaways\n\n- **Send summaries to AI, not raw data.** Structured text summaries are more token-efficient, equally informative for analysis, and let you control exactly what context the model has. This is the pattern most production data AI tools use.\n- **Separate your AI calls.** One call for the text answer, a separate call for chart type, another for column selection. Each prompt is simpler, outputs are more parseable, and failures are isolated.\n- **SQLAlchemy's cascades are powerful.** `cascade='all, delete-orphan'` One time and your entire data hierarchy cleans up automatically. No manual delete queries across tables.\n- **Flask Blueprints are just an organisation.** They're not especially complex \u2014 they're a way to split a growing `app.py` list into logical groups. Start using them before your app file gets too big, not after.\n- **`NaN` is not `null`**. In JSON, missing values are `null`. Python's `float('nan')` serializes to bare `NaN` which browsers can't parse. Always sanitize DataFrames before JSONifying them.\n\n---\n\n## Resources\n\n- GitHub repo: `github.com/shlokbam/ai-data-analyst`\n- Groq API docs\n- Flask-Login documentation\n- SQLAlchemy ORM tutorial\n- ReportLab user guide\n",
                 content_type="BUILD",
                 category="AI",
                 reading_time="13 min read",
                 status="PUBLISHED",
                 featured=True,
                 published_at="2026-03-25",
-                github_repo="shlokbam/ai-data-analyst"
+                cover_image="https://images.unsplash.com/photo-1516321318423-f06f85e504b3?q=80&w=1000&auto=format&fit=crop",
+                author="Shlok Bam",
+                project_slug=null,
+                github_repo="shlokbam/ai-data-analyst",
+                tags=tags_2
             )
-            db.add(datalens_post)
-        else:
-            existing_datalens.content = datalens_content
-            existing_datalens.reading_time = "13 min read"
-            existing_datalens.published_at = "2026-03-25"
-
-        # Seed Article 3: MockVue
-        mockvue_slug = "i-built-an-ai-powered-mock-interview-platform-from-scratch-here-s-everything-that-went-wrong"
-        mockvue_content = """![MockVue AI Powered Mock Interview Banner](mockvue-hero)
-
-# Before We Start — Why I Built This
-
-I was preparing for campus placements. And I kept reading about companies like JPMorgan, Goldman Sachs, and TCS using AI-powered video assessment platforms for first-round interviews. You record yourself answering questions. An AI grades you. You never even speak to a human until the second round.
-
-The problem? There was no good way to practice for this format. Mock interview tools either had fake questions, no video component, or gave you generic feedback like "speak more clearly." None of them actually simulated what these AI platforms do.
-
-So I stopped looking for one and built it.
-
-MockVue is a full-stack AI mock interview platform. You pick a company and role, answer 5 video questions under timed conditions, and get an AI-generated score across three dimensions: answer quality, speaking confidence, and eye contact. The feedback is detailed, the questions are company-specific, and the experience is close to what the actual platforms feel like.
-
-This is the full story of building it — the architecture, every technical decision, every bug, and every "oh that's why" moment.
-
----
-
-## What I Built
-
-![MockVue End-to-End Architecture](mockvue-architecture)
-
-A user picks a company (Google, JPMorgan, TCS, etc.) and a role. They get 5 questions. For each question: 30 seconds to read, 2 minutes to answer on camera. The platform records their video, tracks their eye contact using AI in real time, transcribes their audio on the server, and then sends everything to another AI model that grades the answer against a rubric.
-
-Here's how the system fits together:
-
-```text
-User's Browser
-    │
-    ├─ Camera + Mic (MediaRecorder API)
-    ├─ Real-time eye tracking (face-api.js)
-    └─ Real-time speech analysis (Web Speech API)
-    │
-    ▼
-React + Vite Frontend (Vercel)
-    │
-    │ POST /answers (multipart: audio + analytics)
-    ▼
-FastAPI Backend (Render)
-    │
-    ├─ Whisper (Groq) — transcribes audio
-    ├─ Llama 3.3 70B (Groq) — grades answer vs rubric
-    └─ Stores result
-    │
-    ▼
-TiDB Cloud (Serverless MySQL)
-```
-
-Every time you submit an answer ➔ audio goes to Groq Whisper ➔ transcript goes to Groq Llama ➔ scores come back ➔ everything gets saved ➔ you see a detailed feedback report.
-
-### Tech Stack:
-
-| What | Tool |
-| :--- | :--- |
-| **Frontend** | React 19 + Vite |
-| **Backend** | FastAPI (Python 3.12) |
-| **Database** | TiDB Cloud Serverless |
-| **AI Evaluation** | Groq (Llama 3.3 70B + Whisper) |
-| **Eye Tracking** | face-api.js |
-| **Frontend Host** | Vercel |
-| **Backend Host** | Render |
-| **Auth** | JWT (python-jose + bcrypt) |
-
----
-
-## Phase 1 — The Question Bank
-
-Before I wrote a single line of frontend code, I needed something to interview users with. A mock interview platform with generic questions is useless. I wanted company-specific, role-specific questions that felt like the real thing.
-
-I curated 270+ behavioural and situational questions across 13 companies (Google, Amazon, Microsoft, Adobe, Meta, Netflix, Flipkart, JPMorgan, Goldman Sachs, TCS, Infosys, Swiggy, Zomato) and 5 roles per company (Software Engineer, Product Manager, Data Analyst, UX Designer, Operations).
-
-Each question has a rubric. Here's an example:
-
-```json
-{
-  "company": "JPMorgan",
-  "role": "Software Engineer",
-  "question_text": "Describe a technical challenge you faced and how you resolved it.",
-  "rubric": [
-    {"point": "Clearly described the technical problem", "points": 8},
-    {"point": "Explained your thought process and approach", "points": 8},
-    {"point": "Mentioned specific technologies or tools used", "points": 8},
-    {"point": "Quantified the result or outcome", "points": 8},
-    {"point": "Reflected on what you learned", "points": 8}
-  ],
-  "model_answer": "During my internship, our microservice was crashing..."
-}
-```
-
-> 💡 **Simple version:** Instead of asking the AI "was this answer good?", I give it a checklist with point values. It scores each item on the checklist separately. This means feedback is specific — "you didn't mention the outcome" — instead of just "answer was mediocre."
-
-The rubric matters because it's what the AI uses for grading. Instead of just asking "was this answer good?", I send Groq the rubric and ask it to score each point specifically. This produces much more actionable feedback.
-
-I also built a `seed_db.py` script so anyone can clone the repo and populate their database in one command:
-
-```bash
-cd backend
-python3 seed_db.py
-```
-
-One important design decision: I built a fallback. If someone picks a company/role combination that has no specific questions, the backend returns General HR questions instead of a 404 error. The app never fails silently.
-
----
-
-## Phase 2 — The Backend (FastAPI + TiDB Cloud)
-
-### Why FastAPI?
-FastAPI was the right choice for one specific reason: it handles async I/O natively, and I was going to be making multiple Groq API calls per answer submission. With a synchronous framework, each API call blocks the server. FastAPI's async handlers let me structure the code cleanly even on a budget hosting plan.
-
-### The Database Setup
-I chose TiDB Cloud Serverless. It's MySQL-compatible, has a free tier, runs entirely in the cloud, and scales to zero — which matters on a student budget.
-
-The tricky part was SSL configuration. TiDB Cloud requires SSL, and the CA certificate path is different on every operating system. I wrote a fallback chain to handle this automatically:
-
-```python
-ca_paths = [
-    "/etc/ssl/cert.pem",                  # Render / Alpine
-    "/etc/ssl/certs/ca-certificates.crt", # Ubuntu / Debian
-    "/etc/pki/tls/certs/ca-bundle.crt"    # CentOS / RHEL
-]
-ca_path = next((p for p in ca_paths if os.path.exists(p)), None)
-connect_args = {"ssl": {"ca": ca_path}}
-```
-
-> 💡 **Simple version:** SSL is like a security handshake between your app and the database. To do that handshake, your app needs a specific certificate file — but that file lives in different places on different servers. This code tries each possible location in order until it finds one that exists.
-
-This is one of those things that works perfectly on your local Mac and then fails on Render because Render uses a different Linux distribution. The fallback chain saved me from an hour of debugging SSL errors in production.
-
-The database also had a driver issue. TiDB's connection string sometimes comes back from the dashboard as `mysql://` without the `+pymysql` specifier. SQLAlchemy doesn't know which MySQL driver to use — it defaults to MySQLdb, which I hadn't installed. One-line fix:
-
-```python
-if "mysql://" in DATABASE_URL and "+pymysql" not in DATABASE_URL:
-    DATABASE_URL = DATABASE_URL.replace("mysql://", "mysql+pymysql://")
-```
-
-> 💡 **Simple version:** The database URL is like an address that tells your app how to connect. The "driver" is like choosing which vehicle to use to get there. This line makes sure the right vehicle (PyMySQL) is always specified, even if the address string forgot to mention it.
-
-One line. But it took me 45 minutes to figure out why my database wouldn't connect when the credentials were clearly correct.
-
-### The Data Models
-Five models: User, Question, Session, Answer, Feedback.
-
-The `Answer` model is the most complex — it stores everything about a single response:
-
-```python
-class Answer(Base):
-    transcript          = Column(Text)
-    answer_score        = Column(Float)   # out of 40 — Groq grades
-    confidence_score    = Column(Float)   # out of 30 — computed locally
-    eye_contact_score   = Column(Float)   # out of 30 — from face-api
-    filler_word_count   = Column(Integer)
-    filler_word_breakdown = Column(JSON)  # {"um": 3, "like": 2}
-    speaking_pace       = Column(Float)   # WPM
-    pause_count         = Column(Integer)
-    gaze_percentage     = Column(Float)   # 0-100
-    groq_feedback       = Column(JSON)    # full Groq response
-```
-
-The total score (answer + confidence + eye contact) adds up to 100. Content matters most (40%), but delivery and presence both count significantly (30% each).
-
-### JWT Authentication
-Standard JWT auth — register, login, protected routes. One detail that matters: token expiry is set to 7 days. For a practice platform where users return daily, forcing re-login after an hour would be annoying. 7 days is the right balance.
-
-> 💡 **Simple version:** JWT is like a temporary pass. When you log in, the server gives you a pass with an expiry date stamped on it. Every time you open the app, you show that pass instead of logging in again. After 7 days the pass expires and you log in once more.
-
----
-
-## Phase 3 — The AI Evaluation Pipeline
-
-This is the core of MockVue and where most of the interesting engineering happened.
-
-When a user submits an answer, three things need to happen:
-1. Transcribe the audio (Groq Whisper)
-2. Grade the transcript against a rubric (Groq Llama 3.3 70B)
-3. Compute confidence metrics (local calculation)
-
-### Step 1: Audio Transcription
-I originally let the browser's Web Speech API handle transcription. It runs locally and is free. But it had two problems: it's unreliable on mobile, and it varies by browser. Some users were getting no transcript at all.
-
-The solution: record the raw audio with MediaRecorder and send it to the backend for Whisper to transcribe:
-
-```python
-if audio:
-    client = Groq(api_key=api_key)
-    transcription = client.audio.translations.create(
-        file=(filename, audio_data),
-        model="whisper-large-v3-turbo",
-        response_format="verbose_json"
-    )
-    transcript = transcription.text.strip()
-```
-
-> 💡 **Simple version:** The browser tries to convert your speech to text in real time, but it often misses things. So instead I also record the actual audio file and send it to Whisper — OpenAI's dedicated speech-to-text model — on the server. Whisper is much more accurate, especially for accented English.
-
-The `verbose_json` format is important. It returns timestamps for each speech segment, which I use to compute pauses:
-
-```python
-segments = getattr(transcription, "segments", [])
-for i in range(1, len(segments)):
-    if segments[i]["start"] - segments[i-1]["end"] >= 3.0:
-        current_pause_count += 1
-```
-
-Any gap longer than 3 seconds between speech segments counts as a long pause. Whisper gives me this for free.
-
-### Step 2: Answer Grading with Llama
-
-```python
-user_prompt = f\"\"\"Interview Question: {question_text}
-
-Rubric (total {total_points} points):
-{rubric_text}
-
-Student's Answer: {transcript}
-
-Score each rubric point and provide specific feedback. Return JSON
-{{
-  "rubric_scores": [
-    {{"point": "rubric point text", "score": N, "max": N, "feedback": "text"}}
-  ],
-  "overall_feedback": "2-3 sentences of specific, actionable feedback",
-  "summary": "one sentence summary of the answer quality",
-  "total_answer_score": N
-}}\"\"\"
-```
-
-> 💡 **Simple version:** I'm basically giving the AI a marking scheme and a student's answer, and asking it to fill in a scorecard. By telling it exactly what JSON structure to return, I can reliably parse the response in code.
-
-Three specific design choices here:
-
-1. **Structured output via prompt engineering.** I don't use Groq's JSON mode — I tell the model exactly what JSON structure to return in plain English. The fallback parser strips code blocks in case the model wraps the JSON in backticks anyway:
-
-```python
-match = re.search(r'\\{.*\\}', raw, re.DOTALL)
-if match:
-    return json.loads(match.group())
-```
-
-2. **Low temperature (0.3).** Interview grading should be consistent. I don't want the same answer to get a 28/40 one day and a 35/40 the next.
-
-> 💡 **Simple version:** "Temperature" in AI models controls how creative/random the output is. 0 = always the same answer. 1 = creative and unpredictable. For grading, I want 0.3 — consistent, but not robotically identical.
-
-3. **Graceful degradation.** If Groq fails (rate limit, network error, invalid key), I return a fallback response with zero scores instead of crashing:
-
-```python
-except Exception as e:
-    return {
-        "rubric_scores": [
-            {"point": r["point"], "score": 0, "max": r["points"],
-             "feedback": "Could not evaluate."}
-            for r in rubric
-        ],
-        "overall_feedback": "Could not evaluate your answer at this time.",
-        "total_answer_score": 0
-    }
-```
-
-The user still gets their confidence and eye contact scores. Their session isn't lost. This kind of defensive programming matters in production.
-
-### Step 3: Confidence Scoring
-This is computed entirely on the backend without any AI. I designed a custom scoring formula:
-
-```python
-def compute_confidence_score(filler_count, wpm, pause_count):
-    # Max 30 points total
-    filler_score = max(0.0, 15.0 - filler_count * 1.5)  # # 15 pts max
-    
-    if 120 <= wpm <= 150:
-        wpm_score = 8.0                                 # # 8 pts max
-    else:
-        distance = min(abs(wpm - 120), abs(wpm - 150))
-        wpm_score = max(0.0, 8.0 - distance * 0.1)
-        
-    pause_score = max(0.0, 7.0 - pause_count * 2.0)     # # 7 pts max
-    
-    return round(filler_score + wpm_score + pause_score, 1)
-```
-
-> 💡 **Simple version:** Three things make you sound confident: not saying "um/uh/like" too much (15 pts), speaking at the right speed — 120 to 150 words per minute (8 pts), and not going silent for more than 3 seconds too often (7 pts). This function just does that math.
-
-The ideal speaking pace is 120–150 WPM — the range commonly cited for professional presentations. Too fast sounds nervous; too slow sounds unsure. The penalty function is smooth, not binary, so someone at 115 WPM isn't punished as harshly as someone at 80 WPM.
-
----
-
-## The BYOK (Bring Your Own Key) Decision
-
-This was the most consequential product decision I made. MockVue requires users to provide their own Groq API key.
-
-> 💡 **Simple version:** Instead of paying for everyone's AI calls out of my own pocket, each user connects their own free Groq account. Groq gives every account a free usage quota, so each user gets their own limit instead of everyone sharing mine.
-
-Why? Because Groq gives every user a free tier with generous limits. If I ran all evaluations through a single API key, I'd hit rate limits within hours of a few users practicing. By having each user bring their own key, every user gets their own quota, and I pay $0 in API costs.
-
-The key is verified before it's saved:
-
-```python
-@router.post("/verify-api-key")
-def verify_api_key(data: schemas.ApiKeyVerify):
-    try:
-        client = Groq(api_key=data.api_key)
-        client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": "ping"}],
-            max_tokens=5
-        )
-        return {"success": True}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid API Key")
-```
-
-A tiny test call — 5 tokens — confirms the key works before saving it. If the key is invalid or the user is over quota, we tell them immediately instead of letting them discover it mid-interview.
-
----
-
-## Phase 4 — The Frontend
-
-### The Interview Flow
-The interview has a deliberate flow built around real AI video assessment platforms:
-
-```text
-Setup Page ➔ Camera Check ➔ Interview Page ➔ Processing ➔ Feedback
-```
-
-Each transition is intentional. The Camera Check page verifies four things before allowing the user to start:
-1. Camera access and video feed
-2. Microphone access and audio levels
-3. face-api.js models loaded
-4. Groq API key active (live test call)
-
-If any of these fail, the user can't start. This prevents a situation where someone answers 5 questions and discovers their microphone was muted the whole time.
-
-### The Reading Phase
-One detail that makes MockVue feel like a real assessment: the 30-second reading phase before recording starts. Real AI interview platforms give you reading time. I replicated this with a countdown timer and a beep at 10 seconds remaining:
-
-```javascript
-const playBeep = () => {
-  const ctx = new AudioContext();
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  osc.connect(gain);
-  gain.connect(ctx.destination);
-  osc.frequency.value = 880;
-  gain.gain.setValueAtTime(0.3, ctx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-  osc.start();
-  osc.stop(ctx.currentTime + 0.3);
-};
-```
-
-> 💡 **Simple version:** The Web Audio API lets you generate sound from scratch in the browser — no audio file needed. I create an oscillator (a tone generator), ramp the volume down quickly to get a sharp beep sound, and play it for 0.3 seconds. One beep = "recording starts in 10 seconds."
-
-Pure Web Audio API. No library needed for a simple beep.
-
----
-
-## Eye Contact — The Hard Part
-
-This was the most technically complex part of the entire project.
-
-> 💡 **Simple version:** face-api.js is a library that looks at your webcam video and finds faces in it. I use it to figure out whether you're looking at the camera or looking away, and track what percentage of your recording time you spent looking at the camera.
-
-face-api.js is a TensorFlow.js-based library that can detect faces and landmarks in a browser video feed. I use two models: TinyFaceDetector (fast, small) and FaceLandmark68TinyNet (68 facial landmarks).
-
-The naive implementation would be: "is a face detected? yes ➔ looking at camera." But that's wrong. Someone looking down at notes has their face in frame but is clearly not looking at the camera.
-
-The better approach: use facial landmarks to estimate head orientation. Specifically, I use the nose tip and eye positions to compute a lateral ratio:
-
-```javascript
-const eyeSpan = rightEye[3].x - leftEye[0].x;
-const noseOffset = nose[0].x - leftEye[0].x;
-const ratio = noseOffset / eyeSpan;
-
-// Ratio ~0.5 = nose is centered between eyes = facing forward
-const isFrontal = ratio > 0.35 && ratio < 0.65;
-```
-
-> 💡 **Simple version:** When you look straight at the camera, your nose tip is roughly halfway between your two eyes (horizontally). When you look left or right, the nose appears to "shift" toward one eye. I measure this shift — if the nose is between 35% and 65% across the eye span, you're looking at the camera. If it's outside that range, you're looking away.
-
-### Problem: face-api.js model files
-The models are binary weight files (~1–3 MB each) that need to be served as static assets. I couldn't import them from npm — I had to download them and put them in `public/models/`. I wrote a Node.js download script for this:
-
-```javascript
-const FILES = [
-  'tiny_face_detector_model-weights_manifest.json',
-  'tiny_face_detector_model-shard1',
-  'face_landmark_68_tiny_model-weights_manifest.json',
-  'face_landmark_68_tiny_model-shard1',
-];
-```
-
-Anyone cloning the repo needs to run this script once before starting the frontend. I missed this in my first README draft and got confused when models silently failed to load on a fresh machine.
-
-### Problem: macOS Safari video readyState
-On Safari, `video.readyState` can stay at 1 (HAVE_METADATA) even when the video looks like it's playing. The face detection interval was running but the video element wasn't actually producing pixel data yet, so every frame returned null.
-
-> 💡 **Simple version:** readyState is the video's way of saying how ready it is. State 1 means "I know the video exists." State 2 means "I have actual frames to show you." Safari was stuck at 1, so when face detection asked "what does the video look like right now?" the answer was "nothing." Fix: only run detection when readyState is at least 2.
-
-Fix: check `readyState >= 2` before running detection, and force-call `video.play()` in the interval callback as a safety measure.
-
-### Problem: gaze percentage accuracy
-Early testing showed gaze percentages of 20–40% for people clearly looking at the camera. I dropped the face detection score threshold from 0.5 to 0.2 and expanded the frontal ratio window from 0.4–0.6 to 0.35–0.65. After this, numbers for someone looking directly at the camera consistently landed in the 75–90% range.
-
----
-
-## Phase 5 — The Camera Check Page
-
-The Camera Check page looks simple but has a lot of defensive code underneath. Getting camera and microphone access in a browser is surprisingly fragile. Different operating systems, browsers, and hardware all behave differently. I went through four iterations before the hardware probe logic became reliable:
-
-```javascript
-try {
-  // Attempt 1: Combined request
-  stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-} catch (probeErr) {
-  // Attempt 2: Split request
-  stream = await navigator.mediaDevices.getUserMedia({ video: true });
-  try {
-    const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    stream.addTrack(audioStream.getAudioTracks()[0]);
-  } catch (audioErr) {
-    // Attempt 3: Raw audio — bypasses strict macOS CoreAudio
-    const rawAudio = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: false }
-    });
-    stream.addTrack(rawAudio.getAudioTracks()[0]);
-  }
-}
-```
-
-> 💡 **Simple version:** Asking for camera and microphone permission can fail in several ways. Instead of giving up on the first failure, I try three progressively simpler requests. The last attempt disables audio processing features (echo cancellation, noise reduction) because macOS sometimes blocks the request when those are turned on and another app is already using the mic.
-
-There's also device selection — dropdowns for switching between multiple cameras or microphones. One subtle point: `enumerateDevices()` doesn't show device labels until the user has already granted permission. So the order wrong and all devices show as "Camera 1", "Microphone 2" with no useful labels.
-
-> 💡 **Simple version:** For privacy reasons, your browser won't tell a website the names of your cameras and microphones until you've already said "yes" to the permission prompt. So the flow must be: ask permission first ➔ then list devices with their real names. Doing it the other way round gets you blank labels.
-
----
-
-## Phase 6 — Deployment and Cloud Architecture
-
-### Frontend on Vercel
-The frontend deployment was the easiest part. Push to GitHub, connect to Vercel, set the `VITE_API_BASE_URL` environment variable to the Render URL, done. The only non-obvious config was `vercel.json`:
-
-```json
-{
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
-}
-```
-
-> 💡 **Simple version:** React apps have one HTML file (`index.html`) and React handles all the different "pages" in JavaScript. But if you directly visit `/dashboard` in the browser, Vercel looks for a file called `dashboard.html`, doesn't find it, and returns a 404. This config tells Vercel: "for any URL, just load index.html and let React figure out the rest."
-
-### Backend on Render
-Render's free tier has a cold start problem. If no requests come in for 15 minutes, the service spins down. The next request takes 30–50 seconds while the server wakes up.
-
-I handled this with a "waking up" overlay that detects slow initial connections:
-
-```javascript
-const timeout = setTimeout(() => {
-  setWakingUp(true);
-}, 2500);
-
-api.get('/').then(() => {
-  clearTimeout(timeout);
-  setWakingUp(false);
-});
-```
-
-> 💡 **Simple version:** If the backend doesn't respond within 2.5 seconds, I assume it's asleep and show a friendly message explaining the wait. If it responds quickly, the message never appears. This stops users from thinking the app is broken — they know it's just warming up.
-
-If the backend doesn't respond within 2.5 seconds, a friendly "we're on the free tier, this takes ~40 seconds" message appears with a progress bar. Users don't rage-quit; they wait. Honest communication about infrastructure limitations is a UX choice.
-
-The database connection also had a cold start issue. Without the `pool_pre_ping` option, the first database query after a server wakeup fails with "MySQL server has gone away":
-
-```python
-engine = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True,
-    connect_args=connect_args
-)
-```
-
-> 💡 **Simple version:** SQLAlchemy keeps a pool of open database connections ready to use. But after the server sleeps and wakes up, those old connections are dead — the database closed them. `pool_pre_ping=True` tells SQLAlchemy to test each connection before using it, and automatically create a fresh one if the old one is dead.
-
----
-
-## Everything That Went Wrong — Summary
-
-Here's every significant bug I hit and how I fixed it.
-
-### Bug 1: CORS errors on first deployment
-The frontend was sending `Authorization: Bearer <token>` headers. CORS preflight requests for credentialed requests are handled differently and were getting blocked.
-
-Fix: Make sure `allow_credentials` and `allow_origins` are compatible — you can't use `["*"]` for origins with `allow_credentials=True` simultaneously.
-
-> 💡 **Simple version:** CORS is a browser security feature that asks the server "is it okay if this website talks to you?" When your request carries a login token, the browser asks this question even more strictly. Getting the server's CORS settings slightly wrong causes the browser to block the request entirely, even though the server itself would have been happy to respond.
-
-### Bug 2: MediaRecorder codec mismatch on iOS Safari
-On iOS, `audio/webm` is not supported by MediaRecorder. The recording silently produced an empty blob.
-
-```javascript
-let mimeType = 'audio/webm';
-if (!MediaRecorder.isTypeSupported(mimeType)) {
-  mimeType = 'audio/mp4';
-}
-```
-
-The file extension sent to Groq Whisper also needs to match the actual format:
-
-```javascript
-let ext = 'webm';
-if (window.mv_audio_blob.type.includes('mp4')) ext = 'mp4';
-formData.append('audio', window.mv_audio_blob, `audio.${ext}`);
-```
-
-> 💡 **Simple version:** Different browsers record audio in different file formats — like how some cameras save as JPEG, others as PNG, others as HEIC. Whisper needs to know the format to decode it. If the file says it's `.webm` but it's actually `.mp4` inside, Whisper rejects it. This took two hours to debug because the failure was completely silent — no error, just no transcript.
-
-### Bug 3: React StrictMode double-mount submitting answers twice
-In React 18+ with StrictMode, every `useEffect` runs twice on mount in development. My Processing page was calling the answer submission API twice, creating duplicate records.
-
-Fix: A ref guard:
-
-```javascript
-const hasSubmitted = useRef(false);
-
-useEffect(() => {
-  if (!hasSubmitted.current) {
-    hasSubmitted.current = true;
-    submitAnswer();
-  }
-}, []);
-```
-
-> 💡 **Simple version:** React's "Strict Mode" deliberately runs your setup code twice in development to help catch bugs. Usually harmless — but if your setup code calls an API, it sends the request twice. A `useRef` variable persists across both runs, so I use it as a "has this already run?" flag. `useState` doesn't work here because React resets state between the two runs.
-
-### Bug 4: TiDB Cloud connection timing out on Render cold start
-The database connection would succeed locally but time out on Render after cold start.
-
-```python
-connect_args["connect_timeout"] = 10
-```
-
-> 💡 **Simple version:** By default, SQLAlchemy waits forever for a database connection to succeed. On Render, after a cold start, the database might take a few seconds to accept connections. Without a timeout, if anything goes wrong, the request just hangs forever instead of failing and letting you retry. 10 seconds is generous enough to handle slow wakeups but short enough to fail fast if something is actually broken.
-
-### Bug 5: face-api.js models loading race condition
-The gaze detection interval would start before the models finished loading and throw errors on every frame.
-
-Fix: Always check `faceapi.nets.tinyFaceDetector.isLoaded` at the start of the detection interval:
-
-```javascript
-if (!faceapi.nets.tinyFaceDetector.isLoaded) return; // skip this frame
-```
-
-> 💡 **Simple version:** The AI models are downloaded from the server asynchronously in the background. But I was starting the detection interval immediately. So for the first few seconds, the interval was running and asking the AI to analyze frames before the AI model had even finished downloading. The fix: just skip any frame where the model isn't ready yet.
-
-### Bug 6: Session score showing 0 mid-interview
-The session's `overall_score` was only calculated when the session was marked "complete." Users checking their dashboard mid-interview would see a score of 0.
-
-Fix: Recalculate and update the session score in real-time every time an answer is submitted:
-
-```python
-answers = db.query(models.Answer).filter(models.Answer.session_id == session_id).all()
-if answers:
-    total = sum((a.answer_score or 0) + (a.confidence_score or 0) + (a.eye_contact_score or 0) for a in answers)
-    session.overall_score = round(total / len(answers), 1)
-```
-
-### Bug 7: Whisper returning empty transcript for short answers
-If a user spoke for less than 2 seconds, Whisper sometimes returned an empty string.
-
-Fix: Fall back to the browser's Web Speech API transcript if Whisper returns empty:
-
-```python
-result_text = transcription.text.strip()
-if result_text:
-    transcript = result_text
-# else: keep the frontend transcript already in the form data
-```
-
-> 💡 **Simple version:** I always send two versions of the transcript to the server: one from the browser's built-in speech recognition (sent as a form field), and one from Whisper (generated on the server from the audio file). If Whisper returns nothing, I use the browser's version as backup. Having two independent sources means something always goes through.
-
----
-
-## Phase 8 — The Feedback Report
-
-Every MockVue score adds up to 100:
-
-| Component | Max | How it's calculated |
-| :--- | :--- | :--- |
-| **Answer Quality** | 40 | Groq Llama grades against rubric |
-| **Confidence** | 30 | Filler words (15) + WPM (8) + Pauses (7) |
-| **Eye Contact** | 30 | `gaze_percentage × 0.3` |
-
-The feedback report breaks down every dimension with specific callouts. The transcript is highlighted — filler words in amber, quality buzzwords in green. The WPM gauge shows pace against the 120–150 ideal zone. The gaze timeline shows a visual representation of camera presence across the recording.
-
-One thing I'm proud of: the priority tip on the Session Complete page. After your session, the system identifies which dimension you scored lowest on proportionally and gives you a specific practice recommendation:
-
-```javascript
-const lowestArea = Math.min(avgAnswer / 40, avgConfidence / 30, avgGaze / 30) === avgAnswer / 40
-  ? { area: 'Answer Quality', tip: 'Focus on the STAR method...' }
-  : Math.min(avgConfidence / 30, avgGaze / 30) === avgConfidence / 30
-  ? { area: 'Confidence', tip: 'Practise out loud daily...' }
-  : { area: 'Eye Contact', tip: 'Place a sticker dot above your camera...' };
-```
-
-> 💡 **Simple version:** Raw scores aren't comparable — 20/40 on answers isn't the same as 20/30 on eye contact. So I convert each score to a percentage of its maximum (answer: /40, confidence: /30, eye contact: /30) before comparing. The lowest percentage tells me which area genuinely needs the most work.
-
----
-
-## What I'd Do Differently
-
-1. **Use a job queue for AI processing.** Right now the answer submission endpoint is synchronous — it calls Whisper, then Llama, then saves to database, all in one request. On Render's free tier this takes 8–15 seconds while the connection hangs. A proper solution would queue the AI processing and let the frontend poll for results.
-2. **Add rate limiting.** The `/auth/register` endpoint has no rate limiting. A bot could create thousands of accounts. Libraries like `slowapi` for FastAPI make this a 10-minute addition.
-3. **Store recordings temporarily.** Right now the audio blob is processed and discarded. Storing it for 24 hours in S3 would let users replay their answers alongside the transcript — significantly more useful for self-improvement.
-4. **Calibrate eye tracking per user.** The nose-to-eye ratio works for most setups but breaks if someone's camera is off-center or they have an unusual setup. A brief calibration step at the Camera Check page would make scores more accurate.
-5. **Ship the feedback report first.** I built the scoring system last, but it's the most important thing from a user perspective. I should have designed the feedback report first and worked backwards to figure out what data I needed to collect. I wasted time building features that didn't contribute to the quality of the feedback.
-
----
-
-## Key Takeaways
-
-- **The BYOK model is underrated.** Making users bring their own API keys is usually seen as friction. For this use case, it was the right call. Every user gets their own rate limit, infrastructure costs stay at $0, and the app can scale without me paying per-evaluation.
-- **Defensive code is worth every line.** The three-attempt hardware probe, the Whisper fallback, the `pool_pre_ping`, the `hasSubmitted` ref guard — none of these are in tutorials. They all came from real failures. Every edge case I handled made the app more trustworthy.
-- **Face detection in the browser is doable but finicky.** face-api.js is mature, but integrating it with MediaRecorder and real-time React state requires care. The key insight: run it in a `setInterval`, not in React's rendering cycle. Keep all heavy computation in refs.
-- **Honest UI for free-tier limitations is good UX.** Instead of hiding the cold start problem, I surfaced it with a friendly message. Users understood. They waited. Nobody complained about the 40-second wakeup time in feedback — they complained about things I could actually fix.
-- **Real projects break in real ways.** Every tutorial shows you the happy path. Building MockVue meant hitting SSL certificate paths, iOS codec incompatibilities, React StrictMode double-mounts, browser permission ordering requirements, and model loading race conditions. Debugging these is the actual job of a developer.
-
----
-
-## Resources
-
-- Live app: `mock-vue.vercel.app`
-- GitHub: `github.com/shlokbam/MockVue`
-- Groq API (free): `console.groq.com`
-- face-api.js: `github.com/vladmandic/face-api`
-- TiDB Cloud: `tidbcloud.com`
-- FastAPI docs: `fastapi.tiangolo.com`
-"""
-        existing_mockvue = db.query(Post).filter(Post.slug == mockvue_slug).first()
-        if not existing_mockvue:
-            mockvue_post = Post(
-                title="I Built an AI-Powered Mock Interview Platform from Scratch — Here's Everything That Went Wrong",
-                slug=mockvue_slug,
-                excerpt="A full walkthrough of building MockVue — React + FastAPI + TiDB Cloud + Groq AI + face-api.js — including every bug, every architectural decision, and every 'why is this not working' moment.",
-                content=mockvue_content,
+            db.add(post_2)
+            db.commit()
+
+        # Seed i-built-an-ai-powered-mock-interview-platform-from-scratch-here-s-everything-that-went-wrong
+        existing_3 = db.query(Post).filter(Post.slug == "i-built-an-ai-powered-mock-interview-platform-from-scratch-here-s-everything-that-went-wrong").first()
+        if not existing_3:
+        tags_3 = []
+        t_ai = db.query(Tag).filter(Tag.name == "AI").first()
+        if not t_ai:
+            t_ai = Tag(name="AI", slug="ai")
+            db.add(t_ai)
+            db.commit()
+        tags_3.append(t_ai)
+        t_python = db.query(Tag).filter(Tag.name == "Python").first()
+        if not t_python:
+            t_python = Tag(name="Python", slug="python")
+            db.add(t_python)
+            db.commit()
+        tags_3.append(t_python)
+        t_react = db.query(Tag).filter(Tag.name == "React").first()
+        if not t_react:
+            t_react = Tag(name="React", slug="react")
+            db.add(t_react)
+            db.commit()
+        tags_3.append(t_react)
+        t_fastapi = db.query(Tag).filter(Tag.name == "FastAPI").first()
+        if not t_fastapi:
+            t_fastapi = Tag(name="FastAPI", slug="fastapi")
+            db.add(t_fastapi)
+            db.commit()
+        tags_3.append(t_fastapi)
+
+            post_3 = Post(
+                title="I Built an AI-Powered Mock Interview Platform from Scratch \u2014 Here's Everything That Went Wrong",
+                slug="i-built-an-ai-powered-mock-interview-platform-from-scratch-here-s-everything-that-went-wrong",
+                excerpt="A full walkthrough of building MockVue \u2014 React + FastAPI + TiDB Cloud + Groq AI + face-api.js \u2014 including every bug, every architectural decision, and every 'why is this not working' moment.",
+                content="![MockVue AI Powered Mock Interview Banner](mockvue-hero)\n\n# Before We Start \u2014 Why I Built This\n\nI was preparing for campus placements. And I kept reading about companies like JPMorgan, Goldman Sachs, and TCS using AI-powered video assessment platforms for first-round interviews. You record yourself answering questions. An AI grades you. You never even speak to a human until the second round.\n\nThe problem? There was no good way to practice for this format. Mock interview tools either had fake questions, no video component, or gave you generic feedback like \"speak more clearly.\" None of them actually simulated what these AI platforms do.\n\nSo I stopped looking for one and built it.\n\nMockVue is a full-stack AI mock interview platform. You pick a company and role, answer 5 video questions under timed conditions, and get an AI-generated score across three dimensions: answer quality, speaking confidence, and eye contact. The feedback is detailed, the questions are company-specific, and the experience is close to what the actual platforms feel like.\n\nThis is the full story of building it \u2014 the architecture, every technical decision, every bug, and every \"oh that's why\" moment.\n\n---\n\n## What I Built\n\n![MockVue End-to-End Architecture](mockvue-architecture)\n\nA user picks a company (Google, JPMorgan, TCS, etc.) and a role. They get 5 questions. For each question: 30 seconds to read, 2 minutes to answer on camera. The platform records their video, tracks their eye contact using AI in real time, transcribes their audio on the server, and then sends everything to another AI model that grades the answer against a rubric.\n\nHere's how the system fits together:\n\n```text\nUser's Browser\n    \u2502\n    \u251c\u2500 Camera + Mic (MediaRecorder API)\n    \u251c\u2500 Real-time eye tracking (face-api.js)\n    \u2514\u2500 Real-time speech analysis (Web Speech API)\n    \u2502\n    \u25bc\nReact + Vite Frontend (Vercel)\n    \u2502\n    \u2502 POST /answers (multipart: audio + analytics)\n    \u25bc\nFastAPI Backend (Render)\n    \u2502\n    \u251c\u2500 Whisper (Groq) \u2014 transcribes audio\n    \u251c\u2500 Llama 3.3 70B (Groq) \u2014 grades answer vs rubric\n    \u2514\u2500 Stores result\n    \u2502\n    \u25bc\nTiDB Cloud (Serverless MySQL)\n```\n\nEvery time you submit an answer \u2794 audio goes to Groq Whisper \u2794 transcript goes to Groq Llama \u2794 scores come back \u2794 everything gets saved \u2794 you see a detailed feedback report.\n\n### Tech Stack:\n\n| What | Tool |\n| :--- | :--- |\n| **Frontend** | React 19 + Vite |\n| **Backend** | FastAPI (Python 3.12) |\n| **Database** | TiDB Cloud Serverless |\n| **AI Evaluation** | Groq (Llama 3.3 70B + Whisper) |\n| **Eye Tracking** | face-api.js |\n| **Frontend Host** | Vercel |\n| **Backend Host** | Render |\n| **Auth** | JWT (python-jose + bcrypt) |\n\n---\n\n## Phase 1 \u2014 The Question Bank\n\nBefore I wrote a single line of frontend code, I needed something to interview users with. A mock interview platform with generic questions is useless. I wanted company-specific, role-specific questions that felt like the real thing.\n\nI curated 270+ behavioural and situational questions across 13 companies (Google, Amazon, Microsoft, Adobe, Meta, Netflix, Flipkart, JPMorgan, Goldman Sachs, TCS, Infosys, Swiggy, Zomato) and 5 roles per company (Software Engineer, Product Manager, Data Analyst, UX Designer, Operations).\n\nEach question has a rubric. Here's an example:\n\n```json\n{\n  \"company\": \"JPMorgan\",\n  \"role\": \"Software Engineer\",\n  \"question_text\": \"Describe a technical challenge you faced and how you resolved it.\",\n  \"rubric\": [\n    {\"point\": \"Clearly described the technical problem\", \"points\": 8},\n    {\"point\": \"Explained your thought process and approach\", \"points\": 8},\n    {\"point\": \"Mentioned specific technologies or tools used\", \"points\": 8},\n    {\"point\": \"Quantified the result or outcome\", \"points\": 8},\n    {\"point\": \"Reflected on what you learned\", \"points\": 8}\n  ],\n  \"model_answer\": \"During my internship, our microservice was crashing...\"\n}\n```\n\n> \ud83d\udca1 **Simple version:** Instead of asking the AI \"was this answer good?\", I give it a checklist with point values. It scores each item on the checklist separately. This means feedback is specific \u2014 \"you didn't mention the outcome\" \u2014 instead of just \"answer was mediocre.\"\n\nThe rubric matters because it's what the AI uses for grading. Instead of just asking \"was this answer good?\", I send Groq the rubric and ask it to score each point specifically. This produces much more actionable feedback.\n\nI also built a `seed_db.py` script so anyone can clone the repo and populate their database in one command:\n\n```bash\ncd backend\npython3 seed_db.py\n```\n\nOne important design decision: I built a fallback. If someone picks a company/role combination that has no specific questions, the backend returns General HR questions instead of a 404 error. The app never fails silently.\n\n---\n\n## Phase 2 \u2014 The Backend (FastAPI + TiDB Cloud)\n\n### Why FastAPI?\nFastAPI was the right choice for one specific reason: it handles async I/O natively, and I was going to be making multiple Groq API calls per answer submission. With a synchronous framework, each API call blocks the server. FastAPI's async handlers let me structure the code cleanly even on a budget hosting plan.\n\n### The Database Setup\nI chose TiDB Cloud Serverless. It's MySQL-compatible, has a free tier, runs entirely in the cloud, and scales to zero \u2014 which matters on a student budget.\n\nThe tricky part was SSL configuration. TiDB Cloud requires SSL, and the CA certificate path is different on every operating system. I wrote a fallback chain to handle this automatically:\n\n```python\nca_paths = [\n    \"/etc/ssl/cert.pem\",                  # Render / Alpine\n    \"/etc/ssl/certs/ca-certificates.crt\", # Ubuntu / Debian\n    \"/etc/pki/tls/certs/ca-bundle.crt\"    # CentOS / RHEL\n]\nca_path = next((p for p in ca_paths if os.path.exists(p)), None)\nconnect_args = {\"ssl\": {\"ca\": ca_path}}\n```\n\n> \ud83d\udca1 **Simple version:** SSL is like a security handshake between your app and the database. To do that handshake, your app needs a specific certificate file \u2014 but that file lives in different places on different servers. This code tries each possible location in order until it finds one that exists.\n\nThis is one of those things that works perfectly on your local Mac and then fails on Render because Render uses a different Linux distribution. The fallback chain saved me from an hour of debugging SSL errors in production.\n\nThe database also had a driver issue. TiDB's connection string sometimes comes back from the dashboard as `mysql://` without the `+pymysql` specifier. SQLAlchemy doesn't know which MySQL driver to use \u2014 it defaults to MySQLdb, which I hadn't installed. One-line fix:\n\n```python\nif \"mysql://\" in DATABASE_URL and \"+pymysql\" not in DATABASE_URL:\n    DATABASE_URL = DATABASE_URL.replace(\"mysql://\", \"mysql+pymysql://\")\n```\n\n> \ud83d\udca1 **Simple version:** The database URL is like an address that tells your app how to connect. The \"driver\" is like choosing which vehicle to use to get there. This line makes sure the right vehicle (PyMySQL) is always specified, even if the address string forgot to mention it.\n\nOne line. But it took me 45 minutes to figure out why my database wouldn't connect when the credentials were clearly correct.\n\n### The Data Models\nFive models: User, Question, Session, Answer, Feedback.\n\nThe `Answer` model is the most complex \u2014 it stores everything about a single response:\n\n```python\nclass Answer(Base):\n    transcript          = Column(Text)\n    answer_score        = Column(Float)   # out of 40 \u2014 Groq grades\n    confidence_score    = Column(Float)   # out of 30 \u2014 computed locally\n    eye_contact_score   = Column(Float)   # out of 30 \u2014 from face-api\n    filler_word_count   = Column(Integer)\n    filler_word_breakdown = Column(JSON)  # {\"um\": 3, \"like\": 2}\n    speaking_pace       = Column(Float)   # WPM\n    pause_count         = Column(Integer)\n    gaze_percentage     = Column(Float)   # 0-100\n    groq_feedback       = Column(JSON)    # full Groq response\n```\n\nThe total score (answer + confidence + eye contact) adds up to 100. Content matters most (40%), but delivery and presence both count significantly (30% each).\n\n### JWT Authentication\nStandard JWT auth \u2014 register, login, protected routes. One detail that matters: token expiry is set to 7 days. For a practice platform where users return daily, forcing re-login after an hour would be annoying. 7 days is the right balance.\n\n> \ud83d\udca1 **Simple version:** JWT is like a temporary pass. When you log in, the server gives you a pass with an expiry date stamped on it. Every time you open the app, you show that pass instead of logging in again. After 7 days the pass expires and you log in once more.\n\n---\n\n## Phase 3 \u2014 The AI Evaluation Pipeline\n\nThis is the core of MockVue and where most of the interesting engineering happened.\n\nWhen a user submits an answer, three things need to happen:\n1. Transcribe the audio (Groq Whisper)\n2. Grade the transcript against a rubric (Groq Llama 3.3 70B)\n3. Compute confidence metrics (local calculation)\n\n### Step 1: Audio Transcription\nI originally let the browser's Web Speech API handle transcription. It runs locally and is free. But it had two problems: it's unreliable on mobile, and it varies by browser. Some users were getting no transcript at all.\n\nThe solution: record the raw audio with MediaRecorder and send it to the backend for Whisper to transcribe:\n\n```python\nif audio:\n    client = Groq(api_key=api_key)\n    transcription = client.audio.translations.create(\n        file=(filename, audio_data),\n        model=\"whisper-large-v3-turbo\",\n        response_format=\"verbose_json\"\n    )\n    transcript = transcription.text.strip()\n```\n\n> \ud83d\udca1 **Simple version:** The browser tries to convert your speech to text in real time, but it often misses things. So instead I also record the actual audio file and send it to Whisper \u2014 OpenAI's dedicated speech-to-text model \u2014 on the server. Whisper is much more accurate, especially for accented English.\n\nThe `verbose_json` format is important. It returns timestamps for each speech segment, which I use to compute pauses:\n\n```python\nsegments = getattr(transcription, \"segments\", [])\nfor i in range(1, len(segments)):\n    if segments[i][\"start\"] - segments[i-1][\"end\"] >= 3.0:\n        current_pause_count += 1\n```\n\nAny gap longer than 3 seconds between speech segments counts as a long pause. Whisper gives me this for free.\n\n### Step 2: Answer Grading with Llama\n\n```python\nuser_prompt = f\"\"\"Interview Question: {question_text}\n\nRubric (total {total_points} points):\n{rubric_text}\n\nStudent's Answer: {transcript}\n\nScore each rubric point and provide specific feedback. Return JSON\n{{\n  \"rubric_scores\": [\n    {{\"point\": \"rubric point text\", \"score\": N, \"max\": N, \"feedback\": \"text\"}}\n  ],\n  \"overall_feedback\": \"2-3 sentences of specific, actionable feedback\",\n  \"summary\": \"one sentence summary of the answer quality\",\n  \"total_answer_score\": N\n}}\"\"\"\n```\n\n> \ud83d\udca1 **Simple version:** I'm basically giving the AI a marking scheme and a student's answer, and asking it to fill in a scorecard. By telling it exactly what JSON structure to return, I can reliably parse the response in code.\n\nThree specific design choices here:\n\n1. **Structured output via prompt engineering.** I don't use Groq's JSON mode \u2014 I tell the model exactly what JSON structure to return in plain English. The fallback parser strips code blocks in case the model wraps the JSON in backticks anyway:\n\n```python\nmatch = re.search(r'\\{.*\\}', raw, re.DOTALL)\nif match:\n    return json.loads(match.group())\n```\n\n2. **Low temperature (0.3).** Interview grading should be consistent. I don't want the same answer to get a 28/40 one day and a 35/40 the next.\n\n> \ud83d\udca1 **Simple version:** \"Temperature\" in AI models controls how creative/random the output is. 0 = always the same answer. 1 = creative and unpredictable. For grading, I want 0.3 \u2014 consistent, but not robotically identical.\n\n3. **Graceful degradation.** If Groq fails (rate limit, network error, invalid key), I return a fallback response with zero scores instead of crashing:\n\n```python\nexcept Exception as e:\n    return {\n        \"rubric_scores\": [\n            {\"point\": r[\"point\"], \"score\": 0, \"max\": r[\"points\"],\n             \"feedback\": \"Could not evaluate.\"}\n            for r in rubric\n        ],\n        \"overall_feedback\": \"Could not evaluate your answer at this time.\",\n        \"total_answer_score\": 0\n    }\n```\n\nThe user still gets their confidence and eye contact scores. Their session isn't lost. This kind of defensive programming matters in production.\n\n### Step 3: Confidence Scoring\nThis is computed entirely on the backend without any AI. I designed a custom scoring formula:\n\n```python\ndef compute_confidence_score(filler_count, wpm, pause_count):\n    # Max 30 points total\n    filler_score = max(0.0, 15.0 - filler_count * 1.5)  # # 15 pts max\n    \n    if 120 <= wpm <= 150:\n        wpm_score = 8.0                                 # # 8 pts max\n    else:\n        distance = min(abs(wpm - 120), abs(wpm - 150))\n        wpm_score = max(0.0, 8.0 - distance * 0.1)\n        \n    pause_score = max(0.0, 7.0 - pause_count * 2.0)     # # 7 pts max\n    \n    return round(filler_score + wpm_score + pause_score, 1)\n```\n\n> \ud83d\udca1 **Simple version:** Three things make you sound confident: not saying \"um/uh/like\" too much (15 pts), speaking at the right speed \u2014 120 to 150 words per minute (8 pts), and not going silent for more than 3 seconds too often (7 pts). This function just does that math.\n\nThe ideal speaking pace is 120\u2013150 WPM \u2014 the range commonly cited for professional presentations. Too fast sounds nervous; too slow sounds unsure. The penalty function is smooth, not binary, so someone at 115 WPM isn't punished as harshly as someone at 80 WPM.\n\n---\n\n## The BYOK (Bring Your Own Key) Decision\n\nThis was the most consequential product decision I made. MockVue requires users to provide their own Groq API key.\n\n> \ud83d\udca1 **Simple version:** Instead of paying for everyone's AI calls out of my own pocket, each user connects their own free Groq account. Groq gives every account a free usage quota, so each user gets their own limit instead of everyone sharing mine.\n\nWhy? Because Groq gives every user a free tier with generous limits. If I ran all evaluations through a single API key, I'd hit rate limits within hours of a few users practicing. By having each user bring their own key, every user gets their own quota, and I pay $0 in API costs.\n\nThe key is verified before it's saved:\n\n```python\n@router.post(\"/verify-api-key\")\ndef verify_api_key(data: schemas.ApiKeyVerify):\n    try:\n        client = Groq(api_key=data.api_key)\n        client.chat.completions.create(\n            model=\"llama-3.3-70b-versatile\",\n            messages=[{\"role\": \"user\", \"content\": \"ping\"}],\n            max_tokens=5\n        )\n        return {\"success\": True}\n    except Exception as e:\n        raise HTTPException(status_code=400, detail=f\"Invalid API Key\")\n```\n\nA tiny test call \u2014 5 tokens \u2014 confirms the key works before saving it. If the key is invalid or the user is over quota, we tell them immediately instead of letting them discover it mid-interview.\n\n---\n\n## Phase 4 \u2014 The Frontend\n\n### The Interview Flow\nThe interview has a deliberate flow built around real AI video assessment platforms:\n\n```text\nSetup Page \u2794 Camera Check \u2794 Interview Page \u2794 Processing \u2794 Feedback\n```\n\nEach transition is intentional. The Camera Check page verifies four things before allowing the user to start:\n1. Camera access and video feed\n2. Microphone access and audio levels\n3. face-api.js models loaded\n4. Groq API key active (live test call)\n\nIf any of these fail, the user can't start. This prevents a situation where someone answers 5 questions and discovers their microphone was muted the whole time.\n\n### The Reading Phase\nOne detail that makes MockVue feel like a real assessment: the 30-second reading phase before recording starts. Real AI interview platforms give you reading time. I replicated this with a countdown timer and a beep at 10 seconds remaining:\n\n```javascript\nconst playBeep = () => {\n  const ctx = new AudioContext();\n  const osc = ctx.createOscillator();\n  const gain = ctx.createGain();\n  osc.connect(gain);\n  gain.connect(ctx.destination);\n  osc.frequency.value = 880;\n  gain.gain.setValueAtTime(0.3, ctx.currentTime);\n  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);\n  osc.start();\n  osc.stop(ctx.currentTime + 0.3);\n};\n```\n\n> \ud83d\udca1 **Simple version:** The Web Audio API lets you generate sound from scratch in the browser \u2014 no audio file needed. I create an oscillator (a tone generator), ramp the volume down quickly to get a sharp beep sound, and play it for 0.3 seconds. One beep = \"recording starts in 10 seconds.\"\n\nPure Web Audio API. No library needed for a simple beep.\n\n---\n\n## Eye Contact \u2014 The Hard Part\n\nThis was the most technically complex part of the entire project.\n\n> \ud83d\udca1 **Simple version:** face-api.js is a library that looks at your webcam video and finds faces in it. I use it to figure out whether you're looking at the camera or looking away, and track what percentage of your recording time you spent looking at the camera.\n\nface-api.js is a TensorFlow.js-based library that can detect faces and landmarks in a browser video feed. I use two models: TinyFaceDetector (fast, small) and FaceLandmark68TinyNet (68 facial landmarks).\n\nThe naive implementation would be: \"is a face detected? yes \u2794 looking at camera.\" But that's wrong. Someone looking down at notes has their face in frame but is clearly not looking at the camera.\n\nThe better approach: use facial landmarks to estimate head orientation. Specifically, I use the nose tip and eye positions to compute a lateral ratio:\n\n```javascript\nconst eyeSpan = rightEye[3].x - leftEye[0].x;\nconst noseOffset = nose[0].x - leftEye[0].x;\nconst ratio = noseOffset / eyeSpan;\n\n// Ratio ~0.5 = nose is centered between eyes = facing forward\nconst isFrontal = ratio > 0.35 && ratio < 0.65;\n```\n\n> \ud83d\udca1 **Simple version:** When you look straight at the camera, your nose tip is roughly halfway between your two eyes (horizontally). When you look left or right, the nose appears to \"shift\" toward one eye. I measure this shift \u2014 if the nose is between 35% and 65% across the eye span, you're looking at the camera. If it's outside that range, you're looking away.\n\n### Problem: face-api.js model files\nThe models are binary weight files (~1\u20133 MB each) that need to be served as static assets. I couldn't import them from npm \u2014 I had to download them and put them in `public/models/`. I wrote a Node.js download script for this:\n\n```javascript\nconst FILES = [\n  'tiny_face_detector_model-weights_manifest.json',\n  'tiny_face_detector_model-shard1',\n  'face_landmark_68_tiny_model-weights_manifest.json',\n  'face_landmark_68_tiny_model-shard1',\n];\n```\n\nAnyone cloning the repo needs to run this script once before starting the frontend. I missed this in my first README draft and got confused when models silently failed to load on a fresh machine.\n\n### Problem: macOS Safari video readyState\nOn Safari, `video.readyState` can stay at 1 (HAVE_METADATA) even when the video looks like it's playing. The face detection interval was running but the video element wasn't actually producing pixel data yet, so every frame returned null.\n\n> \ud83d\udca1 **Simple version:** readyState is the video's way of saying how ready it is. State 1 means \"I know the video exists.\" State 2 means \"I have actual frames to show you.\" Safari was stuck at 1, so when face detection asked \"what does the video look like right now?\" the answer was \"nothing.\" Fix: only run detection when readyState is at least 2.\n\nFix: check `readyState >= 2` before running detection, and force-call `video.play()` in the interval callback as a safety measure.\n\n### Problem: gaze percentage accuracy\nEarly testing showed gaze percentages of 20\u201340% for people clearly looking at the camera. I dropped the face detection score threshold from 0.5 to 0.2 and expanded the frontal ratio window from 0.4\u20130.6 to 0.35\u20130.65. After this, numbers for someone looking directly at the camera consistently landed in the 75\u201390% range.\n\n---\n\n## Phase 5 \u2014 The Camera Check Page\n\nThe Camera Check page looks simple but has a lot of defensive code underneath. Getting camera and microphone access in a browser is surprisingly fragile. Different operating systems, browsers, and hardware all behave differently. I went through four iterations before the hardware probe logic became reliable:\n\n```javascript\ntry {\n  // Attempt 1: Combined request\n  stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });\n} catch (probeErr) {\n  // Attempt 2: Split request\n  stream = await navigator.mediaDevices.getUserMedia({ video: true });\n  try {\n    const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });\n    stream.addTrack(audioStream.getAudioTracks()[0]);\n  } catch (audioErr) {\n    // Attempt 3: Raw audio \u2014 bypasses strict macOS CoreAudio\n    const rawAudio = await navigator.mediaDevices.getUserMedia({\n      audio: { echoCancellation: false, noiseSuppression: false }\n    });\n    stream.addTrack(rawAudio.getAudioTracks()[0]);\n  }\n}\n```\n\n> \ud83d\udca1 **Simple version:** Asking for camera and microphone permission can fail in several ways. Instead of giving up on the first failure, I try three progressively simpler requests. The last attempt disables audio processing features (echo cancellation, noise reduction) because macOS sometimes blocks the request when those are turned on and another app is already using the mic.\n\nThere's also device selection \u2014 dropdowns for switching between multiple cameras or microphones. One subtle point: `enumerateDevices()` doesn't show device labels until the user has already granted permission. So the order wrong and all devices show as \"Camera 1\", \"Microphone 2\" with no useful labels.\n\n> \ud83d\udca1 **Simple version:** For privacy reasons, your browser won't tell a website the names of your cameras and microphones until you've already said \"yes\" to the permission prompt. So the flow must be: ask permission first \u2794 then list devices with their real names. Doing it the other way round gets you blank labels.\n\n---\n\n## Phase 6 \u2014 Deployment and Cloud Architecture\n\n### Frontend on Vercel\nThe frontend deployment was the easiest part. Push to GitHub, connect to Vercel, set the `VITE_API_BASE_URL` environment variable to the Render URL, done. The only non-obvious config was `vercel.json`:\n\n```json\n{\n  \"rewrites\": [{ \"source\": \"/(.*)\", \"destination\": \"/index.html\" }]\n}\n```\n\n> \ud83d\udca1 **Simple version:** React apps have one HTML file (`index.html`) and React handles all the different \"pages\" in JavaScript. But if you directly visit `/dashboard` in the browser, Vercel looks for a file called `dashboard.html`, doesn't find it, and returns a 404. This config tells Vercel: \"for any URL, just load index.html and let React figure out the rest.\"\n\n### Backend on Render\nRender's free tier has a cold start problem. If no requests come in for 15 minutes, the service spins down. The next request takes 30\u201350 seconds while the server wakes up.\n\nI handled this with a \"waking up\" overlay that detects slow initial connections:\n\n```javascript\nconst timeout = setTimeout(() => {\n  setWakingUp(true);\n}, 2500);\n\napi.get('/').then(() => {\n  clearTimeout(timeout);\n  setWakingUp(false);\n});\n```\n\n> \ud83d\udca1 **Simple version:** If the backend doesn't respond within 2.5 seconds, I assume it's asleep and show a friendly message explaining the wait. If it responds quickly, the message never appears. This stops users from thinking the app is broken \u2014 they know it's just warming up.\n\nIf the backend doesn't respond within 2.5 seconds, a friendly \"we're on the free tier, this takes ~40 seconds\" message appears with a progress bar. Users don't rage-quit; they wait. Honest communication about infrastructure limitations is a UX choice.\n\nThe database connection also had a cold start issue. Without the `pool_pre_ping` option, the first database query after a server wakeup fails with \"MySQL server has gone away\":\n\n```python\nengine = create_engine(\n    DATABASE_URL,\n    pool_pre_ping=True,\n    connect_args=connect_args\n)\n```\n\n> \ud83d\udca1 **Simple version:** SQLAlchemy keeps a pool of open database connections ready to use. But after the server sleeps and wakes up, those old connections are dead \u2014 the database closed them. `pool_pre_ping=True` tells SQLAlchemy to test each connection before using it, and automatically create a fresh one if the old one is dead.\n\n---\n\n## Everything That Went Wrong \u2014 Summary\n\nHere's every significant bug I hit and how I fixed it.\n\n### Bug 1: CORS errors on first deployment\nThe frontend was sending `Authorization: Bearer <token>` headers. CORS preflight requests for credentialed requests are handled differently and were getting blocked.\n\nFix: Make sure `allow_credentials` and `allow_origins` are compatible \u2014 you can't use `[\"*\"]` for origins with `allow_credentials=True` simultaneously.\n\n> \ud83d\udca1 **Simple version:** CORS is a browser security feature that asks the server \"is it okay if this website talks to you?\" When your request carries a login token, the browser asks this question even more strictly. Getting the server's CORS settings slightly wrong causes the browser to block the request entirely, even though the server itself would have been happy to respond.\n\n### Bug 2: MediaRecorder codec mismatch on iOS Safari\nOn iOS, `audio/webm` is not supported by MediaRecorder. The recording silently produced an empty blob.\n\n```javascript\nlet mimeType = 'audio/webm';\nif (!MediaRecorder.isTypeSupported(mimeType)) {\n  mimeType = 'audio/mp4';\n}\n```\n\nThe file extension sent to Groq Whisper also needs to match the actual format:\n\n```javascript\nlet ext = 'webm';\nif (window.mv_audio_blob.type.includes('mp4')) ext = 'mp4';\nformData.append('audio', window.mv_audio_blob, `audio.${ext}`);\n```\n\n> \ud83d\udca1 **Simple version:** Different browsers record audio in different file formats \u2014 like how some cameras save as JPEG, others as PNG, others as HEIC. Whisper needs to know the format to decode it. If the file says it's `.webm` but it's actually `.mp4` inside, Whisper rejects it. This took two hours to debug because the failure was completely silent \u2014 no error, just no transcript.\n\n### Bug 3: React StrictMode double-mount submitting answers twice\nIn React 18+ with StrictMode, every `useEffect` runs twice on mount in development. My Processing page was calling the answer submission API twice, creating duplicate records.\n\nFix: A ref guard:\n\n```javascript\nconst hasSubmitted = useRef(false);\n\nuseEffect(() => {\n  if (!hasSubmitted.current) {\n    hasSubmitted.current = true;\n    submitAnswer();\n  }\n}, []);\n```\n\n> \ud83d\udca1 **Simple version:** React's \"Strict Mode\" deliberately runs your setup code twice in development to help catch bugs. Usually harmless \u2014 but if your setup code calls an API, it sends the request twice. A `useRef` variable persists across both runs, so I use it as a \"has this already run?\" flag. `useState` doesn't work here because React resets state between the two runs.\n\n### Bug 4: TiDB Cloud connection timing out on Render cold start\nThe database connection would succeed locally but time out on Render after cold start.\n\n```python\nconnect_args[\"connect_timeout\"] = 10\n```\n\n> \ud83d\udca1 **Simple version:** By default, SQLAlchemy waits forever for a database connection to succeed. On Render, after a cold start, the database might take a few seconds to accept connections. Without a timeout, if anything goes wrong, the request just hangs forever instead of failing and letting you retry. 10 seconds is generous enough to handle slow wakeups but short enough to fail fast if something is actually broken.\n\n### Bug 5: face-api.js models loading race condition\nThe gaze detection interval would start before the models finished loading and throw errors on every frame.\n\nFix: Always check `faceapi.nets.tinyFaceDetector.isLoaded` at the start of the detection interval:\n\n```javascript\nif (!faceapi.nets.tinyFaceDetector.isLoaded) return; // skip this frame\n```\n\n> \ud83d\udca1 **Simple version:** The AI models are downloaded from the server asynchronously in the background. But I was starting the detection interval immediately. So for the first few seconds, the interval was running and asking the AI to analyze frames before the AI model had even finished downloading. The fix: just skip any frame where the model isn't ready yet.\n\n### Bug 6: Session score showing 0 mid-interview\nThe session's `overall_score` was only calculated when the session was marked \"complete.\" Users checking their dashboard mid-interview would see a score of 0.\n\nFix: Recalculate and update the session score in real-time every time an answer is submitted:\n\n```python\nanswers = db.query(models.Answer).filter(models.Answer.session_id == session_id).all()\nif answers:\n    total = sum((a.answer_score or 0) + (a.confidence_score or 0) + (a.eye_contact_score or 0) for a in answers)\n    session.overall_score = round(total / len(answers), 1)\n```\n\n### Bug 7: Whisper returning empty transcript for short answers\nIf a user spoke for less than 2 seconds, Whisper sometimes returned an empty string.\n\nFix: Fall back to the browser's Web Speech API transcript if Whisper returns empty:\n\n```python\nresult_text = transcription.text.strip()\nif result_text:\n    transcript = result_text\n# else: keep the frontend transcript already in the form data\n```\n\n> \ud83d\udca1 **Simple version:** I always send two versions of the transcript to the server: one from the browser's built-in speech recognition (sent as a form field), and one from Whisper (generated on the server from the audio file). If Whisper returns nothing, I use the browser's version as backup. Having two independent sources means something always goes through.\n\n---\n\n## Phase 8 \u2014 The Feedback Report\n\nEvery MockVue score adds up to 100:\n\n| Component | Max | How it's calculated |\n| :--- | :--- | :--- |\n| **Answer Quality** | 40 | Groq Llama grades against rubric |\n| **Confidence** | 30 | Filler words (15) + WPM (8) + Pauses (7) |\n| **Eye Contact** | 30 | `gaze_percentage \u00d7 0.3` |\n\nThe feedback report breaks down every dimension with specific callouts. The transcript is highlighted \u2014 filler words in amber, quality buzzwords in green. The WPM gauge shows pace against the 120\u2013150 ideal zone. The gaze timeline shows a visual representation of camera presence across the recording.\n\nOne thing I'm proud of: the priority tip on the Session Complete page. After your session, the system identifies which dimension you scored lowest on proportionally and gives you a specific practice recommendation:\n\n```javascript\nconst lowestArea = Math.min(avgAnswer / 40, avgConfidence / 30, avgGaze / 30) === avgAnswer / 40\n  ? { area: 'Answer Quality', tip: 'Focus on the STAR method...' }\n  : Math.min(avgConfidence / 30, avgGaze / 30) === avgConfidence / 30\n  ? { area: 'Confidence', tip: 'Practise out loud daily...' }\n  : { area: 'Eye Contact', tip: 'Place a sticker dot above your camera...' };\n```\n\n> \ud83d\udca1 **Simple version:** Raw scores aren't comparable \u2014 20/40 on answers isn't the same as 20/30 on eye contact. So I convert each score to a percentage of its maximum (answer: /40, confidence: /30, eye contact: /30) before comparing. The lowest percentage tells me which area genuinely needs the most work.\n\n---\n\n## What I'd Do Differently\n\n1. **Use a job queue for AI processing.** Right now the answer submission endpoint is synchronous \u2014 it calls Whisper, then Llama, then saves to database, all in one request. On Render's free tier this takes 8\u201315 seconds while the connection hangs. A proper solution would queue the AI processing and let the frontend poll for results.\n2. **Add rate limiting.** The `/auth/register` endpoint has no rate limiting. A bot could create thousands of accounts. Libraries like `slowapi` for FastAPI make this a 10-minute addition.\n3. **Store recordings temporarily.** Right now the audio blob is processed and discarded. Storing it for 24 hours in S3 would let users replay their answers alongside the transcript \u2014 significantly more useful for self-improvement.\n4. **Calibrate eye tracking per user.** The nose-to-eye ratio works for most setups but breaks if someone's camera is off-center or they have an unusual setup. A brief calibration step at the Camera Check page would make scores more accurate.\n5. **Ship the feedback report first.** I built the scoring system last, but it's the most important thing from a user perspective. I should have designed the feedback report first and worked backwards to figure out what data I needed to collect. I wasted time building features that didn't contribute to the quality of the feedback.\n\n---\n\n## Key Takeaways\n\n- **The BYOK model is underrated.** Making users bring their own API keys is usually seen as friction. For this use case, it was the right call. Every user gets their own rate limit, infrastructure costs stay at $0, and the app can scale without me paying per-evaluation.\n- **Defensive code is worth every line.** The three-attempt hardware probe, the Whisper fallback, the `pool_pre_ping`, the `hasSubmitted` ref guard \u2014 none of these are in tutorials. They all came from real failures. Every edge case I handled made the app more trustworthy.\n- **Face detection in the browser is doable but finicky.** face-api.js is mature, but integrating it with MediaRecorder and real-time React state requires care. The key insight: run it in a `setInterval`, not in React's rendering cycle. Keep all heavy computation in refs.\n- **Honest UI for free-tier limitations is good UX.** Instead of hiding the cold start problem, I surfaced it with a friendly message. Users understood. They waited. Nobody complained about the 40-second wakeup time in feedback \u2014 they complained about things I could actually fix.\n- **Real projects break in real ways.** Every tutorial shows you the happy path. Building MockVue meant hitting SSL certificate paths, iOS codec incompatibilities, React StrictMode double-mounts, browser permission ordering requirements, and model loading race conditions. Debugging these is the actual job of a developer.\n\n---\n\n## Resources\n\n- Live app: `mock-vue.vercel.app`\n- GitHub: `github.com/shlokbam/MockVue`\n- Groq API (free): `console.groq.com`\n- face-api.js: `github.com/vladmandic/face-api`\n- TiDB Cloud: `tidbcloud.com`\n- FastAPI docs: `fastapi.tiangolo.com`\n",
                 content_type="BUILD",
                 category="AI",
                 reading_time="28 min read",
                 status="PUBLISHED",
                 featured=True,
                 published_at="2026-04-05",
-                github_repo="shlokbam/MockVue"
+                cover_image="https://images.unsplash.com/photo-1516321318423-f06f85e504b3?q=80&w=1000&auto=format&fit=crop",
+                author="Shlok Bam",
+                project_slug=null,
+                github_repo="shlokbam/MockVue",
+                tags=tags_3
             )
-            db.add(mockvue_post)
-        else:
-            existing_mockvue.content = mockvue_content
-            existing_mockvue.reading_time = "28 min read"
-            existing_mockvue.published_at = "2026-04-05"
-
-        # Seed 4th Article — Eagle LMS
-        lms_slug = "i-built-an-enterprise-lms-with-local-cloud-devops-from-scratch-here-s-everything-that-went-wrong"
-        lms_content = """![Building Eagle LMS Banner](hero-banner)
-
-# Building Eagle LMS: How I Led a Full-Stack Industry-Sponsored Project from Napkin to Production
-
-**By Shlok Bam — Project Lead, Eagle LMS**  
-**Academic Guide:** Mrs. Pallavi Malji Khalde  
-**Industry Mentors:** Mr. Manish Godse & Mr. Shashikant Sir, Eagle Industrial Services Pvt. Ltd.  
-
-This is a deep-dive into a real, ongoing, industry-sponsored college project. The code is reviewed. The product is in testing. The bugs were real. I'm writing this while it's still fresh — because in six months, you forget the pain.
-
----
-
-## 1. Why I Built This
-
-**Eagle Industrial Services Pvt. Ltd.** is a Pune-based security and facility management company with over 2,500 employees, 110+ clients, and 15+ years in operations. They run everything from security guard deployment to housekeeping and QRT (Quick Response Team) response teams.
-
-This project was given to our entire department as an industry-sponsored initiative, with different teams taking on different modules of a larger system. Our team of five was assigned the **Learning Management System** — the training and assessment platform for Eagle's workforce.
-
-Eagle already had an operational system in place. It was not broken — a company operating at their scale with their client base doesn't survive on broken systems. But the LMS component specifically was an area identified for modernisation. The goal was to build something purpose-built for their training workflows: **phased content delivery**, **scheduled assessments**, **per-user progress tracking**, and **performance reports** that a trainer could actually use.
-
-Mr. Manish Godse came to our college with a clear picture of what was needed. We listened, we documented everything, and we built it.
-
----
-
-## 2. What I Built
-
-Eagle LMS is a full-stack training platform built specifically for Eagle Industrial Services. It has three core parts:
-
-1. **A Web Portal for Trainers and Trainees (React + Vite):** Trainers create modules, upload materials, schedule sessions, create timed MCQ tests, and view performance reports. Trainees access enrolled modules, open materials, take tests, and track progress.
-2. **A React Native Mobile App (Expo):** Built for both roles (trainers and trainees) after the web portal was validated across the first three meetings.
-3. **A Shared FastAPI Backend:** Serving both web and mobile from the same API endpoints and the same MySQL database.
-
-The system is **role-based** (trainer vs trainee), **phase-aware** (materials and tests unlock based on whether a session is pre, live, or post), and includes **per-user watermarking** on every PDF and image served to trainees.
-
-### Architecture Overview
-
-```text
-┌────────────────────────────────────────────────────────┐
-│                     CLIENT LAYER                       │
-│                                                        │
-│   React + Vite (Web)          React Native + Expo      │
-│   ┌─────────────┐             ┌─────────────────┐      │
-│   │ Trainer UI  │             │  Trainer App    │      │
-│   │ Trainee UI  │             │  Trainee App    │      │
-│   └──────┬──────┘             └────────┬────────┘      │
-└──────────┼─────────────────────────────┼───────────────┘
-           │ JWT Bearer Token            │ JWT Bearer Token
-           ▼                             ▼
-┌─────────────────────────────────────────────────────────┐
-│                  FastAPI BACKEND                        │
-│                                                         │
-│   /api/auth     /api/trainer    /api/trainee            │
-│   /api/notifications  /api/progress  /uploads/{file}    │
-│                                                         │
-│   Auth Layer: JWT decode → role check → dependency      │
-│   File Layer: watermark generated per user on serve     │
-└────────────────────────────┬────────────────────────────┘
-                             │ SQLAlchemy ORM
-                             ▼
-┌─────────────────────────────────────────────────────────┐
-│                     MySQL DATABASE                      │
-│                                                         │
-│  users → modules → chapters → materials                 │
-│       → tests → questions → test_attempts               │
-│       → enrollments → progress → notifications          │
-└─────────────────────────────────────────────────────────┘
-```
-
-> 💡 **Simple version:** Think of it like Udemy, but built specifically for a security company's internal training. Trainers are like course creators. Trainees are like students. The backend is the engine connecting them. The database is where everything is stored.
-
----
-
-## 3. Tech Stack
-
-| Layer | Technology | Why We Chose It |
-| :--- | :--- | :--- |
-| **Backend API** | FastAPI (Python) | Fast, async, auto-generates docs at `/docs` |
-| **ORM** | SQLAlchemy 2.0 | Declarative models, clean query interface |
-| **Database** | MySQL 8 + PyMySQL | Production-grade, relational, matches existing infra |
-| **Auth** | JWT + SHA-256 | Matched existing Flask app's password hashing |
-| **File Handling** | Pillow + pypdf + ReportLab | Per-user watermarking on PDFs and images |
-| **Web Frontend** | React 18 + Vite + Router v6 | Fast dev server, SPA routing, component model |
-| **HTTP Client** | Axios | Interceptors for JWT attachment and 401 auto-redirect |
-| **Mobile** | React Native + Expo | Cross-platform iOS/Android from one codebase |
-| **Mobile Storage** | Expo SecureStore | JWT stored securely on device, not in plain storage |
-| **Styling** | Custom CSS design system | Full dark/light mode, no component library needed |
-
----
-
-## 4. The Journey — Meeting by Meeting
-
-| # | Title | What Happened |
-| :--- | :--- | :--- |
-| **Meeting 1** | Requirements | Mr. Godse explained the full system precisely. We documented every requirement. This session became the spec — and it saved us from rework later. |
-| **Meeting 2** | First Demo | Two weeks later — full UI + functionality shown. He was impressed. Still had UI and logic gaps. We wrote down every correction. |
-| **Meeting 3** | Refined Build | Improved UI and functionality approved. Database, frontend, and backend validated. More small corrections guided. |
-| **Meeting 4** | Mobile Brief | Fully satisfied with web portal. New ask: build a mobile app for trainers and trainees. We had never done React Native before. |
-| **Meeting 5** | Mobile Demo Crash | App crashed during demo. Sir was calm. He gave UI feedback, then asked us to build the trainer app too. |
-| **Meeting 6** | Full Sync Demo | Both apps syncing with web in real-time. Trainer creates on web, trainee sees it on mobile instantly. Sir tells us next meeting will include a technical reviewer. |
-| **Meeting 7** | Shashikant Sir Review | Longest meeting. App crashed again. Both sirs were calm. Shashikant Sir walked through the whole codebase, explained Eagle's operational workflow, what gaps our system fills, and what improvements to make. Told us to push to GitHub and make him a contributor. |
-
----
-
-## 5. Phase by Phase: How I Actually Built It
-
-### Phase 1 — Requirements & Database Design
-
-The first meeting with Mr. Manish Godse set the tone for the entire project. He didn't come with vague ideas. He came with a clear picture — role-based access, phased content release, timed tests, watermarked materials, performance reports. I noted down every requirement precisely.
-
-The database schema came directly from this meeting. I designed it before writing a single line of application code:
-
-```text
-users (id, name, email, password, role, phone, department, profile_pic)
-  │
-  ├── modules (trainer_id, title, description, category,
-  │           start_datetime, end_datetime, status,
-  │           training_type, meet_link, color)
-  │     │
-  │     ├── chapters (module_id, title, order_num)
-  │     │     └── materials (chapter_id, title, file_path,
-  │     │                   release_phase, order_num)
-  │     │
-  │     ├── tests (module_id, title, test_type[pre/mid/post],
-  │     │         duration_minutes, passing_marks, max_attempts)
-  │     │       └── questions (test_id, question_text,
-  │     │                     option_a/b/c/d, correct_option, marks)
-  │     │             └── test_attempts (test_id, trainee_id,
-  │     │                               score, percentage, passed)
-  │     │
-  │     └── enrollments (module_id, trainee_id)
-  │
-  └── progress (module_id, trainee_id, material_id, completed)
-      notifications (user_id, title, body, type, is_read)
-```
-
-> 💡 **Simple version:** Before writing code, I drew out exactly what information the system needed to store and how everything connects. This is called a database schema — the blueprint for your data. A good schema designed upfront saves you from painful restructuring later.
-
----
-
-### Phase 2 — Backend API
-
-The backend is a FastAPI application split into domain-specific routers: `auth`, `trainer`, `trainee`, `progress`, `notifications`, and `files`. Every protected route uses a dependency injection chain that decodes the JWT, loads the user, and optionally checks their role:
-
-```python
-def get_current_user(credentials, db) -> models.User:
-    token = credentials.credentials
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(401, "Invalid or expired token")
-    user = db.query(models.User).filter(
-        models.User.id == int(payload.get('sub'))
-    ).first()
-    return user
-
-def require_trainer(current_user = Depends(get_current_user)):
-    if current_user.role != "trainer":
-        raise HTTPException(403, "Trainer access required")
-    return current_user
-```
-
-> 💡 **Simple version:** Every time a request arrives at a protected route, this code runs first — automatically. It checks: is this person logged in? Do they have permission? Think of it as a security guard at every door who checks your ID before letting you through.
-
-One specific auth decision deserves explanation. Eagle already had an existing application that used SHA-256 password hashing. Bcrypt is more secure, but switching would have invalidated every existing employee account. So I matched the existing behaviour intentionally — a pragmatic tradeoff chosen with full awareness of its implications.
-
-#### Phase-Based Content Locking
-
-Materials are tagged as `pre`, `live`, or `post`. The system calculates the current module phase from its start and end datetimes, then determines what's accessible:
-
-```python
-PHASE_ORDER = {'pre': 1, 'live': 2, 'post': 3, 'upcoming': 0}
-
-def canAccess(matPhase, modulePhase):
-    return PHASE_ORDER[matPhase] <= PHASE_ORDER[modulePhase]
-```
-
-A pre-session PDF is accessible during pre, live, and post. A post-session summary is locked until the session has started. This logic is enforced both on the frontend (UI shows 'Locked') and on the backend (the file serve endpoint checks the phase before serving the file).
-
-> 💡 **Simple version:** Imagine a textbook where chapter 3 is glued shut until you finish chapter 2. That's what this does — certain training materials only unlock at the right stage of the session.
-
----
-
-### Phase 3 — The Watermarking System
-
-Every PDF and image served to a trainee gets a personalised watermark containing the company name and the trainee's email address. It is generated on-the-fly the first time a user accesses a file, then cached for subsequent requests:
-
-```python
-@router.get('/uploads/{filename}')
-def serve_file(filename, token, db):
-    current_user = _get_user_from_request(token, db)
-    if current_user and current_user.role == 'trainee':
-        wm_filename = f'wm_{current_user.id}_{filename}'
-        wm_path = os.path.join(UPLOAD_DIR, wm_filename)
-        if not os.path.exists(wm_path):
-            text = f'Eagle Securities | {current_user.email}'
-            if ext == 'pdf':
-                watermark_pdf(file_path, wm_path, text)
-            else:
-                watermark_image(file_path, wm_path, text)
-        return FileResponse(wm_path)
-```
-
-> 💡 **Simple version:** If a trainee downloads a training PDF and shares it externally, every page shows their name and email. Each person gets their own copy of the file with their identity baked in. This discourages leaking of confidential training materials.
-
-For PDFs, this uses `pypdf` to overlay a `ReportLab` canvas with rotated semi-transparent text on every page. For images, `Pillow` composites a tiled text overlay at low opacity. The file is generated once per user-file pair and cached on disk.
-
----
-
-### Phase 4 — The Web Frontend
-
-The web frontend is a React SPA with React Router v6, built entirely with a custom CSS design system using CSS variables. No Tailwind, no component library — all custom. The design system supports full dark/light mode via a `data-theme` attribute on the `html` element.
-
-The test engine was particularly interesting to build. A trainee gets a timed MCQ test with a countdown timer. The timer lives in React state, decremented via `setTimeout`, and auto-submits at zero. Critically, score calculation is done server-side:
-
-```python
-# Backend score calculation — client sends answers, server checks
-score = 0
-for q in questions:
-    if answers_dict.get(str(q.id)) == q.correct_option:
-        score += q.marks
-
-pct = (score / total * 100)
-passed = pct >= test.passing_marks
-```
-
-> 💡 **Simple version:** Always calculate grades on the server, never on the client. A user could manipulate JavaScript in their browser to send a fake score. The server doesn't trust what the client says the score was — it recalculates it from the raw answers.
-
-The result page has an animated SVG score ring — a circle with `stroke-dashoffset` that animates to the score percentage. The trainer reports page shows per-trainee, per-test performance in a table with pass/fail badges.
-
----
-
-### Phase 5 — Learning React Native and Building the Mobile App
-
-After meeting four, the brief was clear: build a mobile app. I had never written React Native before.
-
-I spent a week learning the fundamentals — `View` instead of `div`, `StyleSheet` instead of CSS, a separate navigation library, `expo-document-picker` for files, `expo-secure-store` for secure token storage instead of `localStorage`. The concepts carry over from React Web, but every primitive is different.
-
-The mobile app shares the same FastAPI backend. The base URL auto-detects the development machine's IP so Android emulators can reach the host machine:
-
-```javascript
-const debuggerHost = Constants.expoConfig?.hostUri;
-let localhost = debuggerHost ? debuggerHost.split(':')[0] : 'localhost';
-
-if (Platform.OS === 'android' && localhost === 'localhost') {
-  localhost = '10.0.2.2'; // Android emulator → host machine
-}
-```
-
-> 💡 **Simple version:** Android emulators run inside a virtual machine. They can't use 'localhost' to reach your laptop's server — they use a special address (10.0.2.2) that means 'the computer I'm running inside of.' This line handles that automatically.
-
----
-
-## 6. Every Bug That Hurt
-
-### Bug 1 — The Cascading State Problem
-This was the most persistent pain point of the entire project. Because the application is large and heavily interconnected — notifications trigger on material upload, enrollments update on module publish, progress feeds into dashboard stats — fixing one thing kept breaking something else.
-
-Solve the test submission logic, and the trainee dashboard percentage stops recalculating. Fix the chapter delete cascade, and material ordering breaks. Fix the file URL for mobile, and the web watermark cache misses.
-
-The root cause was always the same: fixing a query or state update path without tracing all downstream consumers of that data.
-
-The fix was disciplined: after every change, run the full user flow. Login as trainee, check dashboard, open a module, open materials, take a test, check result, check profile stats. Tedious but non-negotiable.
-
-> 💡 **Simple version:** In a big app, everything connects to everything. Fixing one leak sometimes opens another one unexpectedly. The only real fix is testing the whole flow after every change, not just the specific thing you touched.
-
----
-
-### Bug 2 — The File Serving Auth Problem
-When a trainee clicks 'Open PDF,' the frontend opens it in an iframe. The problem: a browser's iframe tag makes a plain HTTP GET request. It cannot attach an `Authorization: Bearer` header — that's only possible from JavaScript `fetch()` or Axios.
-
-The PDF endpoint returned a 401. The iframe showed nothing. No error in the console. The 401 was silently consumed by the browser — the hardest kind of bug to diagnose.
-
-The fix was a query-parameter token approach. The backend was updated to accept the JWT from either the `Authorization` header or a `?token=` query parameter:
-
-```python
-def _get_user_from_request(token, db):
-    if not token: return None
-    payload = decode_token(token)
-    if not payload: return None
-    return db.query(models.User).filter_by(
-        id=int(payload.get('sub', 0))
-    ).first()
-```
-
-> 💡 **Simple version:** Think of it like a bouncer checking ID. Your JavaScript can hand over its ID smoothly. But when a browser navigates directly to a URL — like showing a PDF in a frame — it can't carry any ID. So we put the ID in the URL itself. It's a known tradeoff, appropriate for an internal corporate system.
-
----
-
-### Bug 3 — The Phase Logic Clock Mismatch
-The test phase logic had a subtle bug. Test availability checks (is this test window open?) were being done by comparing the test's `start_datetime` against the client's local JavaScript clock. The backend was doing the same comparison against its own clock.
-
-A trainee could see a 'Take Test' button on the frontend — client clock said it was open — but the backend would return a 403 because its clock said otherwise. The error message was opaque: 'Test window closed.'
-
-The fix was to include the server's current timestamp in the module API response and have the client use that for all time comparisons:
-
-```python
-return {
-    "module": ...,
-    "phase": phase,
-    "now_iso": datetime.now().isoformat(), # client uses this
-}
-```
-
-> 💡 **Simple version:** Your laptop's clock and the server's clock may differ. If test availability is based on a time comparison and both sides use different clocks, they'll disagree. Solution: always use the server's time for time-sensitive decisions.
-
----
-
-### Bug 4 — The Silent `meet_link` Schema Gap
-Midway through the project, a new requirement came in: add training types (self-paced, virtual, classroom) and a `meet_link` field for virtual and classroom sessions. The modules table already existed, so I wrote a migration script to add the new columns.
-
-The bug: I forgot to update the Pydantic `ScheduleRequest` schema to include `meet_link`. The frontend was sending it. The backend received it but silently discarded it — not declared in the schema, not validated, not saved. No exception. No error. Just silent data loss.
-
-> 💡 **Simple version:** Always check that both sides of a data flow speak the same language. When you add a field to the database, also add it to the schema that receives the data, and the schema that returns it. One missed step and data disappears quietly.
-
----
-
-### Bug 5 — React Native File Upload on Android
-The mobile app's material upload feature uses `expo-document-picker`. On iOS, the picked file's URI works as-is. On Android, the URI is a content URI (`content://...`) that can't be read by a plain HTTP request.
-
-The Axios multipart upload was failing silently on Android — no useful error, just no file arriving at the server.
-
-The fix was ensuring the `FormData` object was constructed with the exact shape React Native's `XMLHttpRequest` implementation expects:
-
-```javascript
-formData.append('file', {
-  uri: uploadForm.file.uri,   // content:// URI on Android
-  name: uploadForm.file.name,
-  type: uploadForm.file.mimeType || 'application/octet-stream',
-});
-```
-
-> 💡 **Simple version:** iOS and Android handle file paths differently. Android uses a special reference code for files instead of a simple path. React Native knows how to send this code to a server — but only if you tell it the exact format. Missing the type field causes silent failure.
-
----
-
-## 7. The Meeting That Mattered Most
-
-Meeting seven was the longest of the project. Mr. Shashikant Sir — a senior technical person from Eagle — watched a live demo. The app crashed again during it.
-
-Both sirs were completely calm. Shashikant Sir said something I won't forget: *"We've all come through this way."*
-
-He then spent an extended session explaining how Eagle's operations actually work — the training schedules for guards spread across client sites, the difficulty of tracking who completed what, how a new system plugs into their workflow. He explained the gaps our LMS was built to fill and what improvements would make it production-ready.
-
-At the end of the meeting, he asked me to push the code to GitHub and make him a contributor. He would review the code and send detailed feedback.
-
-Current status: the portal is ready for testing. Code review is in progress.
-
-> 💡 **Simple version:** A crash in a demo is not a failure — it's data. What matters is the response. Staying calm, understanding what failed, fixing it, and coming back better is what professionals do. This was perhaps the most important lesson of the project.
-
----
-
-## 8. What I'd Do Differently
-
-1. **Start with API versioning (`/api/v1/...`):** When the mobile app needed slightly different response shapes, I had to add conditional logic inside existing endpoints. Versioned routes from day one would have kept this clean.
-2. **Use Alembic for migrations instead of raw `ALTER TABLE` scripts:** The `migrate.py` approach works but is fragile. Alembic gives you versioned, reversible migrations tracked in git alongside the code.
-3. **Abstract the phase logic into one shared utility:** The `_get_phase()` function exists in two different routers with slightly different implementations. Two versions of the same logic means two places to fix when requirements change.
-4. **Test on real devices earlier:** Both demo crashes happened because emulator testing was thorough but real-device testing under real network conditions started too late. It should start at the same time as feature development.
-5. **Keep a bug log during development:** A simple markdown file tracking 'what I changed and what it affected' would have made the cascading bug problem far easier to diagnose.
-
----
-
-## 9. Key Takeaways
-
-Working on this project across seven meetings and several months taught me things that no classroom session delivers.
-
-- **Requirements documentation is an engineering skill:** The reason meeting one went well is that I treated note-taking as seriously as coding. Every detail Mr. Godse explained was written down precisely. That document became the spec. The spec became the schema. The schema became the code. The schema I designed in meeting one survived all seven meetings with only two added columns.
-- **Big applications break at integration points, not in isolation:** Individual features worked perfectly in development. Things broke when they interacted with each other under real usage. Integration testing is not optional, and you need to run full user flows regularly — not just unit test individual functions.
-- **Industry experience is irreplaceable:** When Shashikant Sir walked through the codebase and explained how their operations actually work, it reframed the entire project. You can build a technically correct system and still miss the point if you don't understand the domain it's serving. That extended session was worth more than any tutorial.
-- **Calm in a crisis is a professional skill:** The app crashed twice in front of industry professionals. Both times, what mattered was the response — understanding the failure, fixing it, and coming back better. That's the standard.
-
----
-
-## 10. Resources & References
-
-- **FastAPI documentation:** `fastapi.tiangolo.com`
-- **SQLAlchemy ORM:** `docs.sqlalchemy.org`
-- **React Router v6:** `reactrouter.com`
-- **Expo React Native:** `docs.expo.dev`
-- **pypdf (PDF manipulation):** `pypdf.readthedocs.io`
-- **Pillow (image processing):** `pillow.readthedocs.io`
-- **python-jose (JWT):** `python-jose.readthedocs.io`
-
-*Eagle LMS is an ongoing industry-sponsored project by a team of five students, under the guidance of Mrs. Pallavi Malji Khalde. The project is currently in the testing and code review phase with Eagle Industrial Services Pvt. Ltd.*
-"""
-        existing_lms = db.query(Post).filter(Post.slug == lms_slug).first()
-        if not existing_lms:
-            lms_post = Post(
+            db.add(post_3)
+            db.commit()
+
+        # Seed i-built-an-enterprise-lms-with-local-cloud-devops-from-scratch-here-s-everything-that-went-wrong
+        existing_4 = db.query(Post).filter(Post.slug == "i-built-an-enterprise-lms-with-local-cloud-devops-from-scratch-here-s-everything-that-went-wrong").first()
+        if not existing_4:
+        tags_4 = []
+        t_ai = db.query(Tag).filter(Tag.name == "AI").first()
+        if not t_ai:
+            t_ai = Tag(name="AI", slug="ai")
+            db.add(t_ai)
+            db.commit()
+        tags_4.append(t_ai)
+        t_python = db.query(Tag).filter(Tag.name == "Python").first()
+        if not t_python:
+            t_python = Tag(name="Python", slug="python")
+            db.add(t_python)
+            db.commit()
+        tags_4.append(t_python)
+        t_react = db.query(Tag).filter(Tag.name == "React").first()
+        if not t_react:
+            t_react = Tag(name="React", slug="react")
+            db.add(t_react)
+            db.commit()
+        tags_4.append(t_react)
+        t_fastapi = db.query(Tag).filter(Tag.name == "FastAPI").first()
+        if not t_fastapi:
+            t_fastapi = Tag(name="FastAPI", slug="fastapi")
+            db.add(t_fastapi)
+            db.commit()
+        tags_4.append(t_fastapi)
+
+            post_4 = Post(
                 title="Building Eagle LMS: How I Led a Full-Stack Industry-Sponsored Project from Napkin to Production",
-                slug=lms_slug,
-                excerpt="The authentic story of leading a team of 5 to build Eagle LMS for Eagle Industrial Services — dual-role web & React Native mobile app, dynamic watermarking, phase-based unlocking, and surviving 7 industry review meetings.",
-                content=lms_content,
+                slug="i-built-an-enterprise-lms-with-local-cloud-devops-from-scratch-here-s-everything-that-went-wrong",
+                excerpt="The authentic story of leading a team of 5 to build Eagle LMS for Eagle Industrial Services \u2014 dual-role web & React Native mobile app, dynamic watermarking, phase-based unlocking, and surviving 7 industry review meetings.",
+                content="![Eagle LMS Hero Banner](eagle-lms-hero)\n\n# Building Eagle LMS: How I Led a Full-Stack Industry-Sponsored Project from Napkin to Production\n\n**By Shlok Bam \u2014 Project Lead, Eagle LMS**  \n**Academic Guide:** Mrs. Pallavi Malji Khalde  \n**Industry Mentors:** Mr. Manish Godse & Mr. Shashikant Sir, Eagle Industrial Services Pvt. Ltd.  \n\nThis is a deep-dive into a real, ongoing, industry-sponsored college project. The code is reviewed. The product is in testing. The bugs were real. I'm writing this while it's still fresh \u2014 because in six months, you forget the pain.\n\n---\n\n## 1. Why I Built This\n\n**Eagle Industrial Services Pvt. Ltd.** is a Pune-based security and facility management company with over 2,500 employees, 110+ clients, and 15+ years in operations. They run everything from security guard deployment to housekeeping and QRT (Quick Response Team) response teams.\n\nThis project was given to our entire department as an industry-sponsored initiative, with different teams taking on different modules of a larger system. Our team of five was assigned the **Learning Management System** \u2014 the training and assessment platform for Eagle's workforce.\n\nEagle already had an operational system in place. It was not broken \u2014 a company operating at their scale with their client base doesn't survive on broken systems. But the LMS component specifically was an area identified for modernisation. The goal was to build something purpose-built for their training workflows: **phased content delivery**, **scheduled assessments**, **per-user progress tracking**, and **performance reports** that a trainer could actually use.\n\nMr. Manish Godse came to our college with a clear picture of what was needed. We listened, we documented everything, and we built it.\n\n---\n\n## 2. What I Built\n\nEagle LMS is a full-stack training platform built specifically for Eagle Industrial Services. It has three core parts:\n\n1. **A Web Portal for Trainers and Trainees (React + Vite):** Trainers create modules, upload materials, schedule sessions, create timed MCQ tests, and view performance reports. Trainees access enrolled modules, open materials, take tests, and track progress.\n2. **A React Native Mobile App (Expo):** Built for both roles (trainers and trainees) after the web portal was validated across the first three meetings.\n3. **A Shared FastAPI Backend:** Serving both web and mobile from the same API endpoints and the same MySQL database.\n\nThe system is **role-based** (trainer vs trainee), **phase-aware** (materials and tests unlock based on whether a session is pre, live, or post), and includes **per-user watermarking** on every PDF and image served to trainees.\n\n### Architecture Overview\n\n```text\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502                     CLIENT LAYER                       \u2502\n\u2502                                                        \u2502\n\u2502   React + Vite (Web)          React Native + Expo      \u2502\n\u2502   \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510             \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510      \u2502\n\u2502   \u2502 Trainer UI  \u2502             \u2502  Trainer App    \u2502      \u2502\n\u2502   \u2502 Trainee UI  \u2502             \u2502  Trainee App    \u2502      \u2502\n\u2502   \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2518             \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518      \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n           \u2502 JWT Bearer Token            \u2502 JWT Bearer Token\n           \u25bc                             \u25bc\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502                  FastAPI BACKEND                        \u2502\n\u2502                                                         \u2502\n\u2502   /api/auth     /api/trainer    /api/trainee            \u2502\n\u2502   /api/notifications  /api/progress  /uploads/{file}    \u2502\n\u2502                                                         \u2502\n\u2502   Auth Layer: JWT decode \u2192 role check \u2192 dependency      \u2502\n\u2502   File Layer: watermark generated per user on serve     \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                             \u2502 SQLAlchemy ORM\n                             \u25bc\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502                     MySQL DATABASE                      \u2502\n\u2502                                                         \u2502\n\u2502  users \u2192 modules \u2192 chapters \u2192 materials                 \u2502\n\u2502       \u2192 tests \u2192 questions \u2192 test_attempts               \u2502\n\u2502       \u2192 enrollments \u2192 progress \u2192 notifications          \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n```\n\n> \ud83d\udca1 **Simple version:** Think of it like Udemy, but built specifically for a security company's internal training. Trainers are like course creators. Trainees are like students. The backend is the engine connecting them. The database is where everything is stored.\n\n---\n\n## 3. Tech Stack\n\n| Layer | Technology | Why We Chose It |\n| :--- | :--- | :--- |\n| **Backend API** | FastAPI (Python) | Fast, async, auto-generates docs at `/docs` |\n| **ORM** | SQLAlchemy 2.0 | Declarative models, clean query interface |\n| **Database** | MySQL 8 + PyMySQL | Production-grade, relational, matches existing infra |\n| **Auth** | JWT + SHA-256 | Matched existing Flask app's password hashing |\n| **File Handling** | Pillow + pypdf + ReportLab | Per-user watermarking on PDFs and images |\n| **Web Frontend** | React 18 + Vite + Router v6 | Fast dev server, SPA routing, component model |\n| **HTTP Client** | Axios | Interceptors for JWT attachment and 401 auto-redirect |\n| **Mobile** | React Native + Expo | Cross-platform iOS/Android from one codebase |\n| **Mobile Storage** | Expo SecureStore | JWT stored securely on device, not in plain storage |\n| **Styling** | Custom CSS design system | Full dark/light mode, no component library needed |\n\n---\n\n## 4. The Journey \u2014 Meeting by Meeting\n\n| # | Title | What Happened |\n| :--- | :--- | :--- |\n| **Meeting 1** | Requirements | Mr. Godse explained the full system precisely. We documented every requirement. This session became the spec \u2014 and it saved us from rework later. |\n| **Meeting 2** | First Demo | Two weeks later \u2014 full UI + functionality shown. He was impressed. Still had UI and logic gaps. We wrote down every correction. |\n| **Meeting 3** | Refined Build | Improved UI and functionality approved. Database, frontend, and backend validated. More small corrections guided. |\n| **Meeting 4** | Mobile Brief | Fully satisfied with web portal. New ask: build a mobile app for trainers and trainees. We had never done React Native before. |\n| **Meeting 5** | Mobile Demo Crash | App crashed during demo. Sir was calm. He gave UI feedback, then asked us to build the trainer app too. |\n| **Meeting 6** | Full Sync Demo | Both apps syncing with web in real-time. Trainer creates on web, trainee sees it on mobile instantly. Sir tells us next meeting will include a technical reviewer. |\n| **Meeting 7** | Shashikant Sir Review | Longest meeting. App crashed again. Both sirs were calm. Shashikant Sir walked through the whole codebase, explained Eagle's operational workflow, what gaps our system fills, and what improvements to make. Told us to push to GitHub and make him a contributor. |\n\n---\n\n## 5. Phase by Phase: How I Actually Built It\n\n### Phase 1 \u2014 Requirements & Database Design\n\nThe first meeting with Mr. Manish Godse set the tone for the entire project. He didn't come with vague ideas. He came with a clear picture \u2014 role-based access, phased content release, timed tests, watermarked materials, performance reports. I noted down every requirement precisely.\n\nThe database schema came directly from this meeting. I designed it before writing a single line of application code:\n\n```text\nusers (id, name, email, password, role, phone, department, profile_pic)\n  \u2502\n  \u251c\u2500\u2500 modules (trainer_id, title, description, category,\n  \u2502           start_datetime, end_datetime, status,\n  \u2502           training_type, meet_link, color)\n  \u2502     \u2502\n  \u2502     \u251c\u2500\u2500 chapters (module_id, title, order_num)\n  \u2502     \u2502     \u2514\u2500\u2500 materials (chapter_id, title, file_path,\n  \u2502     \u2502                   release_phase, order_num)\n  \u2502     \u2502\n  \u2502     \u251c\u2500\u2500 tests (module_id, title, test_type[pre/mid/post],\n  \u2502     \u2502         duration_minutes, passing_marks, max_attempts)\n  \u2502     \u2502       \u2514\u2500\u2500 questions (test_id, question_text,\n  \u2502     \u2502                     option_a/b/c/d, correct_option, marks)\n  \u2502     \u2502             \u2514\u2500\u2500 test_attempts (test_id, trainee_id,\n  \u2502     \u2502                               score, percentage, passed)\n  \u2502     \u2502\n  \u2502     \u2514\u2500\u2500 enrollments (module_id, trainee_id)\n  \u2502\n  \u2514\u2500\u2500 progress (module_id, trainee_id, material_id, completed)\n      notifications (user_id, title, body, type, is_read)\n```\n\n> \ud83d\udca1 **Simple version:** Before writing code, I drew out exactly what information the system needed to store and how everything connects. This is called a database schema \u2014 the blueprint for your data. A good schema designed upfront saves you from painful restructuring later.\n\n---\n\n### Phase 2 \u2014 Backend API\n\nThe backend is a FastAPI application split into domain-specific routers: `auth`, `trainer`, `trainee`, `progress`, `notifications`, and `files`. Every protected route uses a dependency injection chain that decodes the JWT, loads the user, and optionally checks their role:\n\n```python\ndef get_current_user(credentials, db) -> models.User:\n    token = credentials.credentials\n    payload = decode_token(token)\n    if not payload:\n        raise HTTPException(401, \"Invalid or expired token\")\n    user = db.query(models.User).filter(\n        models.User.id == int(payload.get('sub'))\n    ).first()\n    return user\n\ndef require_trainer(current_user = Depends(get_current_user)):\n    if current_user.role != \"trainer\":\n        raise HTTPException(403, \"Trainer access required\")\n    return current_user\n```\n\n> \ud83d\udca1 **Simple version:** Every time a request arrives at a protected route, this code runs first \u2014 automatically. It checks: is this person logged in? Do they have permission? Think of it as a security guard at every door who checks your ID before letting you through.\n\nOne specific auth decision deserves explanation. Eagle already had an existing application that used SHA-256 password hashing. Bcrypt is more secure, but switching would have invalidated every existing employee account. So I matched the existing behaviour intentionally \u2014 a pragmatic tradeoff chosen with full awareness of its implications.\n\n#### Phase-Based Content Locking\n\nMaterials are tagged as `pre`, `live`, or `post`. The system calculates the current module phase from its start and end datetimes, then determines what's accessible:\n\n```python\nPHASE_ORDER = {'pre': 1, 'live': 2, 'post': 3, 'upcoming': 0}\n\ndef canAccess(matPhase, modulePhase):\n    return PHASE_ORDER[matPhase] <= PHASE_ORDER[modulePhase]\n```\n\nA pre-session PDF is accessible during pre, live, and post. A post-session summary is locked until the session has started. This logic is enforced both on the frontend (UI shows 'Locked') and on the backend (the file serve endpoint checks the phase before serving the file).\n\n> \ud83d\udca1 **Simple version:** Imagine a textbook where chapter 3 is glued shut until you finish chapter 2. That's what this does \u2014 certain training materials only unlock at the right stage of the session.\n\n---\n\n### Phase 3 \u2014 The Watermarking System\n\nEvery PDF and image served to a trainee gets a personalised watermark containing the company name and the trainee's email address. It is generated on-the-fly the first time a user accesses a file, then cached for subsequent requests:\n\n```python\n@router.get('/uploads/{filename}')\ndef serve_file(filename, token, db):\n    current_user = _get_user_from_request(token, db)\n    if current_user and current_user.role == 'trainee':\n        wm_filename = f'wm_{current_user.id}_{filename}'\n        wm_path = os.path.join(UPLOAD_DIR, wm_filename)\n        if not os.path.exists(wm_path):\n            text = f'Eagle Securities | {current_user.email}'\n            if ext == 'pdf':\n                watermark_pdf(file_path, wm_path, text)\n            else:\n                watermark_image(file_path, wm_path, text)\n        return FileResponse(wm_path)\n```\n\n> \ud83d\udca1 **Simple version:** If a trainee downloads a training PDF and shares it externally, every page shows their name and email. Each person gets their own copy of the file with their identity baked in. This discourages leaking of confidential training materials.\n\nFor PDFs, this uses `pypdf` to overlay a `ReportLab` canvas with rotated semi-transparent text on every page. For images, `Pillow` composites a tiled text overlay at low opacity. The file is generated once per user-file pair and cached on disk.\n\n---\n\n### Phase 4 \u2014 The Web Frontend\n\nThe web frontend is a React SPA with React Router v6, built entirely with a custom CSS design system using CSS variables. No Tailwind, no component library \u2014 all custom. The design system supports full dark/light mode via a `data-theme` attribute on the `html` element.\n\nThe test engine was particularly interesting to build. A trainee gets a timed MCQ test with a countdown timer. The timer lives in React state, decremented via `setTimeout`, and auto-submits at zero. Critically, score calculation is done server-side:\n\n```python\n# Backend score calculation \u2014 client sends answers, server checks\nscore = 0\nfor q in questions:\n    if answers_dict.get(str(q.id)) == q.correct_option:\n        score += q.marks\n\npct = (score / total * 100)\npassed = pct >= test.passing_marks\n```\n\n> \ud83d\udca1 **Simple version:** Always calculate grades on the server, never on the client. A user could manipulate JavaScript in their browser to send a fake score. The server doesn't trust what the client says the score was \u2014 it recalculates it from the raw answers.\n\nThe result page has an animated SVG score ring \u2014 a circle with `stroke-dashoffset` that animates to the score percentage. The trainer reports page shows per-trainee, per-test performance in a table with pass/fail badges.\n\n---\n\n### Phase 5 \u2014 Learning React Native and Building the Mobile App\n\nAfter meeting four, the brief was clear: build a mobile app. I had never written React Native before.\n\nI spent a week learning the fundamentals \u2014 `View` instead of `div`, `StyleSheet` instead of CSS, a separate navigation library, `expo-document-picker` for files, `expo-secure-store` for secure token storage instead of `localStorage`. The concepts carry over from React Web, but every primitive is different.\n\nThe mobile app shares the same FastAPI backend. The base URL auto-detects the development machine's IP so Android emulators can reach the host machine:\n\n```javascript\nconst debuggerHost = Constants.expoConfig?.hostUri;\nlet localhost = debuggerHost ? debuggerHost.split(':')[0] : 'localhost';\n\nif (Platform.OS === 'android' && localhost === 'localhost') {\n  localhost = '10.0.2.2'; // Android emulator \u2192 host machine\n}\n```\n\n> \ud83d\udca1 **Simple version:** Android emulators run inside a virtual machine. They can't use 'localhost' to reach your laptop's server \u2014 they use a special address (10.0.2.2) that means 'the computer I'm running inside of.' This line handles that automatically.\n\n---\n\n## 6. Every Bug That Hurt\n\n### Bug 1 \u2014 The Cascading State Problem\nThis was the most persistent pain point of the entire project. Because the application is large and heavily interconnected \u2014 notifications trigger on material upload, enrollments update on module publish, progress feeds into dashboard stats \u2014 fixing one thing kept breaking something else.\n\nSolve the test submission logic, and the trainee dashboard percentage stops recalculating. Fix the chapter delete cascade, and material ordering breaks. Fix the file URL for mobile, and the web watermark cache misses.\n\nThe root cause was always the same: fixing a query or state update path without tracing all downstream consumers of that data.\n\nThe fix was disciplined: after every change, run the full user flow. Login as trainee, check dashboard, open a module, open materials, take a test, check result, check profile stats. Tedious but non-negotiable.\n\n> \ud83d\udca1 **Simple version:** In a big app, everything connects to everything. Fixing one leak sometimes opens another one unexpectedly. The only real fix is testing the whole flow after every change, not just the specific thing you touched.\n\n---\n\n### Bug 2 \u2014 The File Serving Auth Problem\nWhen a trainee clicks 'Open PDF,' the frontend opens it in an iframe. The problem: a browser's iframe tag makes a plain HTTP GET request. It cannot attach an `Authorization: Bearer` header \u2014 that's only possible from JavaScript `fetch()` or Axios.\n\nThe PDF endpoint returned a 401. The iframe showed nothing. No error in the console. The 401 was silently consumed by the browser \u2014 the hardest kind of bug to diagnose.\n\nThe fix was a query-parameter token approach. The backend was updated to accept the JWT from either the `Authorization` header or a `?token=` query parameter:\n\n```python\ndef _get_user_from_request(token, db):\n    if not token: return None\n    payload = decode_token(token)\n    if not payload: return None\n    return db.query(models.User).filter_by(\n        id=int(payload.get('sub', 0))\n    ).first()\n```\n\n> \ud83d\udca1 **Simple version:** Think of it like a bouncer checking ID. Your JavaScript can hand over its ID smoothly. But when a browser navigates directly to a URL \u2014 like showing a PDF in a frame \u2014 it can't carry any ID. So we put the ID in the URL itself. It's a known tradeoff, appropriate for an internal corporate system.\n\n---\n\n### Bug 3 \u2014 The Phase Logic Clock Mismatch\nThe test phase logic had a subtle bug. Test availability checks (is this test window open?) were being done by comparing the test's `start_datetime` against the client's local JavaScript clock. The backend was doing the same comparison against its own clock.\n\nA trainee could see a 'Take Test' button on the frontend \u2014 client clock said it was open \u2014 but the backend would return a 403 because its clock said otherwise. The error message was opaque: 'Test window closed.'\n\nThe fix was to include the server's current timestamp in the module API response and have the client use that for all time comparisons:\n\n```python\nreturn {\n    \"module\": ...,\n    \"phase\": phase,\n    \"now_iso\": datetime.now().isoformat(), # client uses this\n}\n```\n\n> \ud83d\udca1 **Simple version:** Your laptop's clock and the server's clock may differ. If test availability is based on a time comparison and both sides use different clocks, they'll disagree. Solution: always use the server's time for time-sensitive decisions.\n\n---\n\n### Bug 4 \u2014 The Silent `meet_link` Schema Gap\nMidway through the project, a new requirement came in: add training types (self-paced, virtual, classroom) and a `meet_link` field for virtual and classroom sessions. The modules table already existed, so I wrote a migration script to add the new columns.\n\nThe bug: I forgot to update the Pydantic `ScheduleRequest` schema to include `meet_link`. The frontend was sending it. The backend received it but silently discarded it \u2014 not declared in the schema, not validated, not saved. No exception. No error. Just silent data loss.\n\n> \ud83d\udca1 **Simple version:** Always check that both sides of a data flow speak the same language. When you add a field to the database, also add it to the schema that receives the data, and the schema that returns it. One missed step and data disappears quietly.\n\n---\n\n### Bug 5 \u2014 React Native File Upload on Android\nThe mobile app's material upload feature uses `expo-document-picker`. On iOS, the picked file's URI works as-is. On Android, the URI is a content URI (`content://...`) that can't be read by a plain HTTP request.\n\nThe Axios multipart upload was failing silently on Android \u2014 no useful error, just no file arriving at the server.\n\nThe fix was ensuring the `FormData` object was constructed with the exact shape React Native's `XMLHttpRequest` implementation expects:\n\n```javascript\nformData.append('file', {\n  uri: uploadForm.file.uri,   // content:// URI on Android\n  name: uploadForm.file.name,\n  type: uploadForm.file.mimeType || 'application/octet-stream',\n});\n```\n\n> \ud83d\udca1 **Simple version:** iOS and Android handle file paths differently. Android uses a special reference code for files instead of a simple path. React Native knows how to send this code to a server \u2014 but only if you tell it the exact format. Missing the type field causes silent failure.\n\n---\n\n## 7. The Meeting That Mattered Most\n\nMeeting seven was the longest of the project. Mr. Shashikant Sir \u2014 a senior technical person from Eagle \u2014 watched a live demo. The app crashed again during it.\n\nBoth sirs were completely calm. Shashikant Sir said something I won't forget: *\"We've all come through this way.\"*\n\nHe then spent an extended session explaining how Eagle's operations actually work \u2014 the training schedules for guards spread across client sites, the difficulty of tracking who completed what, how a new system plugs into their workflow. He explained the gaps our LMS was built to fill and what improvements would make it production-ready.\n\nAt the end of the meeting, he asked me to push the code to GitHub and make him a contributor. He would review the code and send detailed feedback.\n\nCurrent status: the portal is ready for testing. Code review is in progress.\n\n> \ud83d\udca1 **Simple version:** A crash in a demo is not a failure \u2014 it's data. What matters is the response. Staying calm, understanding what failed, fixing it, and coming back better is what professionals do. This was perhaps the most important lesson of the project.\n\n---\n\n## 8. What I'd Do Differently\n\n1. **Start with API versioning (`/api/v1/...`):** When the mobile app needed slightly different response shapes, I had to add conditional logic inside existing endpoints. Versioned routes from day one would have kept this clean.\n2. **Use Alembic for migrations instead of raw `ALTER TABLE` scripts:** The `migrate.py` approach works but is fragile. Alembic gives you versioned, reversible migrations tracked in git alongside the code.\n3. **Abstract the phase logic into one shared utility:** The `_get_phase()` function exists in two different routers with slightly different implementations. Two versions of the same logic means two places to fix when requirements change.\n4. **Test on real devices earlier:** Both demo crashes happened because emulator testing was thorough but real-device testing under real network conditions started too late. It should start at the same time as feature development.\n5. **Keep a bug log during development:** A simple markdown file tracking 'what I changed and what it affected' would have made the cascading bug problem far easier to diagnose.\n\n---\n\n## 9. Key Takeaways\n\nWorking on this project across seven meetings and several months taught me things that no classroom session delivers.\n\n- **Requirements documentation is an engineering skill:** The reason meeting one went well is that I treated note-taking as seriously as coding. Every detail Mr. Godse explained was written down precisely. That document became the spec. The spec became the schema. The schema became the code. The schema I designed in meeting one survived all seven meetings with only two added columns.\n- **Big applications break at integration points, not in isolation:** Individual features worked perfectly in development. Things broke when they interacted with each other under real usage. Integration testing is not optional, and you need to run full user flows regularly \u2014 not just unit test individual functions.\n- **Industry experience is irreplaceable:** When Shashikant Sir walked through the codebase and explained how their operations actually work, it reframed the entire project. You can build a technically correct system and still miss the point if you don't understand the domain it's serving. That extended session was worth more than any tutorial.\n- **Calm in a crisis is a professional skill:** The app crashed twice in front of industry professionals. Both times, what mattered was the response \u2014 understanding the failure, fixing it, and coming back better. That's the standard.\n\n---\n\n## 10. Resources & References\n\n- **FastAPI documentation:** `fastapi.tiangolo.com`\n- **SQLAlchemy ORM:** `docs.sqlalchemy.org`\n- **React Router v6:** `reactrouter.com`\n- **Expo React Native:** `docs.expo.dev`\n- **pypdf (PDF manipulation):** `pypdf.readthedocs.io`\n- **Pillow (image processing):** `pillow.readthedocs.io`\n- **python-jose (JWT):** `python-jose.readthedocs.io`\n\n*Eagle LMS is an ongoing industry-sponsored project by a team of five students, under the guidance of Mrs. Pallavi Malji Khalde. The project is currently in the testing and code review phase with Eagle Industrial Services Pvt. Ltd.*\n",
                 content_type="BUILD",
                 category="DevOps",
                 reading_time="25 min read",
                 status="PUBLISHED",
                 featured=True,
                 published_at="2026-04-18",
-                github_repo="shlokbam/lms"
+                cover_image="https://images.unsplash.com/photo-1516321318423-f06f85e504b3?q=80&w=1000&auto=format&fit=crop",
+                author="Shlok Bam",
+                project_slug=null,
+                github_repo="shlokbam/lms",
+                tags=tags_4
             )
-            db.add(lms_post)
-        else:
-            existing_lms.title = "Building Eagle LMS: How I Led a Full-Stack Industry-Sponsored Project from Napkin to Production"
-            existing_lms.excerpt = "The authentic story of leading a team of 5 to build Eagle LMS for Eagle Industrial Services — dual-role web & React Native mobile app, dynamic watermarking, phase-based unlocking, and surviving 7 industry review meetings."
-            existing_lms.content = lms_content
-            existing_lms.reading_time = "25 min read"
-            existing_lms.published_at = "2026-04-18"
+            db.add(post_4)
+            db.commit()
 
-        db.commit()
+        # Seed i-built-dailydiff-an-autonomous-multi-agent-tech-research-editorial-team
+        existing_5 = db.query(Post).filter(Post.slug == "i-built-dailydiff-an-autonomous-multi-agent-tech-research-editorial-team").first()
+        if not existing_5:
+        tags_5 = []
+        t_ai = db.query(Tag).filter(Tag.name == "AI").first()
+        if not t_ai:
+            t_ai = Tag(name="AI", slug="ai")
+            db.add(t_ai)
+            db.commit()
+        tags_5.append(t_ai)
+        t_langgraph = db.query(Tag).filter(Tag.name == "LangGraph").first()
+        if not t_langgraph:
+            t_langgraph = Tag(name="LangGraph", slug="langgraph")
+            db.add(t_langgraph)
+            db.commit()
+        tags_5.append(t_langgraph)
+        t_fastapi = db.query(Tag).filter(Tag.name == "FastAPI").first()
+        if not t_fastapi:
+            t_fastapi = Tag(name="FastAPI", slug="fastapi")
+            db.add(t_fastapi)
+            db.commit()
+        tags_5.append(t_fastapi)
+        t_python = db.query(Tag).filter(Tag.name == "Python").first()
+        if not t_python:
+            t_python = Tag(name="Python", slug="python")
+            db.add(t_python)
+            db.commit()
+        tags_5.append(t_python)
+        t_react = db.query(Tag).filter(Tag.name == "React").first()
+        if not t_react:
+            t_react = Tag(name="React", slug="react")
+            db.add(t_react)
+            db.commit()
+        tags_5.append(t_react)
 
+            post_5 = Post(
+                title="I Built DailyDiff \u2014 An Autonomous Multi-Agent Tech Research & Editorial Team",
+                slug="i-built-dailydiff-an-autonomous-multi-agent-tech-research-editorial-team",
+                excerpt="How I engineered an autonomous 7-agent editorial system using LangGraph, FastAPI, and Brevo to filter technical noise from GitHub, arXiv, and Dev.to into sharp 5-point developer briefings.",
+                content="![DailyDiff Hero Banner](dailydiff-hero)\n\n# Before We Start \u2014 Why I Built This\n\nEvery morning as a software developer, I faced the same routine: opening Hacker News, GitHub Trending, Dev.to, and Twitter, wading through hundreds of clickbait articles, 15-minute AI wrappers, and rehashed marketing posts just to find 2 or 3 genuine engineering updates.\n\nI wanted an automated system that operated under one strict philosophy: **\"We scan the noise, five things survive.\"**\n\nSo I built **DailyDiff** \u2014 an autonomous multi-agent tech research and editorial team powered by **LangGraph**, **FastAPI**, **Vite + React**, and **Brevo**. It runs on a scheduled cron workflow (Mon, Wed, Fri at 03:30 UTC), ingests raw signals from across the web, sanitizes and verifies technical claims, evaluates developer utility, compiles a sharp 5-item briefing, and emails it directly to subscribers.\n\nThis post breaks down the entire system architecture, the 7-agent LangGraph workflow, multi-LLM resiliency, real engineering bugs, and how it was deployed live at `dailydiff.in`.\n\n---\n\n## 1. System Architecture & The 7-Agent Graph\n\nDailyDiff is built as a Directed Acyclic Graph (DAG) using **LangGraph**. Unlike simple chain-of-thought prompts, LangGraph allows stateful agent nodes to read from and write to a shared thread state dictionary (`AgentState`).\n\nHere is the high-level system architecture:\n\n```text\n               \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n               \u2502    Scout Agent (Multi-Source Scraper)    \u2502\n               \u2502  Hacker News API \u2022 Dev.to \u2022 GitHub API   \u2502\n               \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                                    \u2502\n                                    \u25bc\n               \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n               \u2502  Skeptic Agent (Deduplication & Hype)    \u2502\n               \u2502  History JSON check + Zero-shot LLM filter\u2502\n               \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                                    \u2502\n                                    \u25bc\n               \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n               \u2502    Research Agent (DOM Crawler & Docs)   \u2502\n               \u2502  Fetches raw READMEs & release notes     \u2502\n               \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                                    \u2502\n                                    \u25bc\n               \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n               \u2502  Verifier Agent (Fact & Claim Checker)   \u2502\n               \u2502  Cross-checks assertions against source  \u2502\n               \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                                    \u2502\n                                    \u25bc\n               \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n               \u2502     Analyst Agent (Developer Utility)    \u2502\n               \u2502  Assigns: WATCH, INTEGRATE, or READ      \u2502\n               \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                                    \u2502\n                                    \u25bc\n               \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n               \u2502   Editor Agent (ELI5 & TL;DR Compiler)   \u2502\n               \u2502  Trims jargon & formats top 5 briefing   \u2502\n               \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                                    \u2502\n                                    \u25bc\n               \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n               \u2502    Publisher Agent (Archive & Dispatch)  \u2502\n               \u2502  Git CMS save + Brevo API email dispatch \u2502\n               \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n```\n\n### Tech Stack\n\n| Domain | Technology |\n| :--- | :--- |\n| **Agent Orchestration** | Python 3.12, LangGraph, LangChain |\n| **Primary AI Engine** | Mistral AI (`open-mixtral-8x22b` / `mistral-small-latest`) |\n| **Fail-safe AI Fallback** | Google Gemini (`gemini-3.5-flash`) |\n| **Web Service API** | FastAPI, Uvicorn, Pydantic |\n| **Database** | SQLite locally, Neon Cloud Postgres in production |\n| **Email Dispatcher** | Brevo REST API v3 (custom domain `briefs@dailydiff.in`) |\n| **Frontend Client** | Vite + React with custom glassmorphism design tokens |\n| **Automation** | GitHub Actions (`thrice_weekly_brief.yml` cron) |\n\n---\n\n## 2. Deep Dive into Agent Specialization\n\nEach node in the LangGraph network operates with a single responsibility and clean input/output contracts.\n\n### Node 1 \u2014 Scout Agent (Multi-Source Ingestion)\nThe Scout node pulls technical signals from three primary channels:\n1. **Hacker News**: Fetches the top 30 item IDs via Firebase REST API (`/v0/topstories.json`) and extracts titles, URLs, and score metadata.\n2. **Dev.to Feed**: Scrapes trending backend and system design RSS feeds.\n3. **GitHub Releases API**: Queries release tag metadata for major core frameworks (`react`, `next.js`, `fastapi`, `tailwindcss`, `django`, `go`).\n\n```python\nasync def fetch_hn_top_stories(limit: int = 30) -> list[dict]:\n    async with httpx.AsyncClient(timeout=10.0) as client:\n        res = await client.get(\"https://hacker-news.firebaseio.com/v0/topstories.json\")\n        story_ids = res.json()[:limit]\n        tasks = [client.get(f\"https://hacker-news.firebaseio.com/v0/item/{sid}.json\") for sid in story_ids]\n        responses = await asyncio.gather(*tasks, return_exceptions=True)\n        return [r.json() for r in responses if hasattr(r, 'status_code') and r.status_code == 200]\n```\n\n### Node 2 \u2014 Skeptic Agent (Deduplication & Hype Filter)\nRaw scraped links contain massive duplicates and low-effort promotional posts. The Skeptic node runs a two-tier filtering strategy:\n- **Algorithmic Deduplication**: Normalizes URLs and checks against `data/history.json` (archived past briefings).\n- **Hype Filter**: Passes candidates through a zero-shot classification prompt to discard marketing fluff, non-technical opinion pieces, and speculative financial news.\n\n> \ud83d\udca1 **Simple Version:** The Scout agent gathers everything like a net thrown in the ocean. The Skeptic agent immediately throws back 80% of the catch \u2014 discarding duplicates, advertisements, and sensational clickbait before any heavy processing happens.\n\n### Node 3 & 4 \u2014 Research & Verifier Agents\n- **Research Agent**: Visits target URLs, strips boilerplate script/nav markup, and extracts the core technical content or README text.\n- **Verifier Agent**: Reads technical assertions (e.g. *\"Reduces memory by 40%\"* or *\"Supports zero-copy deserialization\"*) and cross-references them against raw release notes or benchmark documentation.\n\n### Node 5 & 6 \u2014 Analyst & Editor Agents\n- **Analyst Agent**: Evaluates direct utility for working software engineers, categorizing each item into an actionable verdict:\n  - `INTEGRATE`: Production-ready tool or critical security update.\n  - `WATCH`: Promising technology worth tracking.\n  - `READ`: Foundational architecture paper or engineering postmortem.\n- **Editor Agent**: Enforces **ELI5** (Explain Like I'm 5) readability standards, limits output to a maximum of $\\le 5$ curated items, and prepends a bold 1-sentence **TL;DR** summary.\n\n---\n\n## 3. Resiliency Engineering: The Multi-LLM Fallback Engine\n\nRelying on a single LLM API provider in an automated cron environment is risky due to rate limits (`HTTP 429`), temporary server outages (`HTTP 500/503`), or context window timeouts.\n\nTo guarantee 99.9% pipeline execution success, I built a custom **`MistralToGeminiFallback`** wrapper class:\n\n```python\nclass MistralToGeminiFallback:\n    def __init__(self, primary_client, fallback_client):\n        self.primary = primary_client\n        self.fallback = fallback_client\n\n    async def generate(self, prompt: str, system_prompt: str) -> str:\n        try:\n            # Primary execution via Mistral AI\n            response = await self.primary.ainvoke([\n                SystemMessage(content=system_prompt),\n                HumanMessage(content=prompt)\n            ])\n            return response.content\n        except Exception as err:\n            logger.warning(f\"[FAILOVER] Mistral API failed ({err}). Rerouting request to Gemini Flash...\")\n            # Automatic failover to Google Gemini\n            response = await self.fallback.ainvoke([\n                SystemMessage(content=system_prompt),\n                HumanMessage(content=prompt)\n            ])\n            return response.content\n```\n\n> \ud83d\udca1 **Simple Version:** Imagine hiring a primary editor (Mistral). If Mistral gets stuck in traffic or doesn't pick up the phone, the system instantly hands the draft to a back-up editor (Gemini) without crashing the pipeline.\n\n---\n\n## 4. Real Engineering Bugs & Hard Lessons\n\nBuilding an autonomous editorial pipeline triggered several subtle production bugs:\n\n### Bug 1 \u2014 Silent Webhook Failures from GitHub Actions\n- **Symptom**: The GitHub Actions runner completed with exit code 0, but no emails were dispatched to subscribers.\n- **Root Cause**: The runner sent a HTTP POST request to Render backend `/api/notify-subscribers`, but because the endpoint lacked proper header authentication, Render quietly returned `401 Unauthorized`. GitHub Actions curl ignored the 401 response status code because `--fail` flag wasn't set.\n- **Fix**: Added a custom secret header `X-Auth-Token: <NOTIFY_SECRET_TOKEN>` verified by FastAPI security dependencies, and added `-f` (`--fail`) to the curl command in `.github/workflows/thrice_weekly_brief.yml`.\n\n### Bug 2 \u2014 Brevo vs Gmail SMTP TLS Handshake Timeout\n- **Symptom**: Local email dispatch worked via Gmail SMTP (`smtp.gmail.com:587`), but failed on Render production servers with `socket.timeout`.\n- **Root Cause**: Render free-tier instances block outbound SMTP port 587 to prevent spam abuse.\n- **Fix**: Switched email dispatching from raw SMTP sockets to **Brevo v3 REST API over HTTP/443** using `httpx.AsyncClient`. HTTP requests pass cleanly through cloud firewalls without socket blocks.\n\n### Bug 3 \u2014 Deduplication State Explosion\n- **Symptom**: The same Hacker News discussion was included twice in consecutive briefings if shared via different URLs (e.g. `https://news.ycombinator.com/item?id=12345` vs `https://example.com/blog?utm_source=hn`).\n- **Root Cause**: String equality check on raw URLs failed due to tracking parameters.\n- **Fix**: Built a URL canonicalization utility that strips tracking parameters (`utm_*`, `ref`, `source`) and normalizes domain names before hashing.\n\n---\n\n## 5. Summary of Bugs & Resolutions\n\n| Problem | Root Cause | Engineering Solution |\n| :--- | :--- | :--- |\n| **Silent GHA webhook failure** | 401 response swallowed by curl | Added `X-Auth-Token` validation + `curl -f` fail-on-error flag |\n| **Render SMTP timeout** | Port 587 blocked on cloud provider | Replaced raw SMTP with Brevo HTTP REST API v3 |\n| **Duplicate article inclusions** | Tracking parameters in URLs (`utm_source`) | Canonicalized URLs and normalized domain hashes |\n| **LangGraph concurrent state overwrite** | Parallel nodes mutating list state | Used `Annotated[list, operator.add]` operator reducers |\n\n---\n\n## 6. What I'd Do Differently & Key Takeaways\n\n1. **Implement RAG for Past Briefings**: Allow subscribers to ask questions across all past briefing archives using vector embeddings.\n2. **Dynamic Topic Personalization**: Let users select tags (`AI`, `DevOps`, `Frontend`, `Rust`) to receive customized briefing variants.\n3. **Automated E2E Testing**: Add mock HTTP fixtures for Hacker News and GitHub APIs in pytest to test pipeline runs without burning LLM API tokens.\n\n### Key Takeaways\n- **Multi-agent state machine design**: Breaking complex tasks into discrete agents with strict Pydantic inputs/outputs is infinitely easier to debug than single long prompts.\n- **LLM failover wrappers are essential**: Production AI workflows must handle 429/500 errors gracefully with automated fallback providers.\n- **Always verify HTTP status codes in CRON jobs**: Never assume a curl command succeeded just because the container didn't crash.\n\n---\n\n## 7. Resources & Links\n\n- **Live Briefing Dashboard**: [https://dailydiff.in](https://dailydiff.in)\n- **GitHub Repository**: [github.com/shlokbam/DailyDiff](https://github.com/shlokbam/DailyDiff)\n- **LangGraph Documentation**: [langchain-ai.github.io/langgraph](https://langchain-ai.github.io/langgraph/)\n- **Brevo API v3 Specs**: [developers.brevo.com](https://developers.brevo.com/)\n",
+                content_type="BUILD",
+                category="DevOps",
+                reading_time="18 min read",
+                status="PUBLISHED",
+                featured=True,
+                published_at="2026-06-12",
+                cover_image="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop",
+                author="Shlok Bam",
+                project_slug=null,
+                github_repo="shlokbam/DailyDiff",
+                tags=tags_5
+            )
+            db.add(post_5)
+            db.commit()
+
+        # Seed building-an-autonomous-multi-agent-ai-research-fact-auditing-system-with-langchain-mistral-and-rag
+        existing_6 = db.query(Post).filter(Post.slug == "building-an-autonomous-multi-agent-ai-research-fact-auditing-system-with-langchain-mistral-and-rag").first()
+        if not existing_6:
+        tags_6 = []
+        t_ai = db.query(Tag).filter(Tag.name == "AI").first()
+        if not t_ai:
+            t_ai = Tag(name="AI", slug="ai")
+            db.add(t_ai)
+            db.commit()
+        tags_6.append(t_ai)
+        t_langchain = db.query(Tag).filter(Tag.name == "LangChain").first()
+        if not t_langchain:
+            t_langchain = Tag(name="LangChain", slug="langchain")
+            db.add(t_langchain)
+            db.commit()
+        tags_6.append(t_langchain)
+        t_mistral = db.query(Tag).filter(Tag.name == "Mistral").first()
+        if not t_mistral:
+            t_mistral = Tag(name="Mistral", slug="mistral")
+            db.add(t_mistral)
+            db.commit()
+        tags_6.append(t_mistral)
+        t_rag = db.query(Tag).filter(Tag.name == "RAG").first()
+        if not t_rag:
+            t_rag = Tag(name="RAG", slug="rag")
+            db.add(t_rag)
+            db.commit()
+        tags_6.append(t_rag)
+        t_python = db.query(Tag).filter(Tag.name == "Python").first()
+        if not t_python:
+            t_python = Tag(name="Python", slug="python")
+            db.add(t_python)
+            db.commit()
+        tags_6.append(t_python)
+
+            post_6 = Post(
+                title="Building an Autonomous Multi-Agent AI Research & Fact-Auditing System with LangChain, Mistral, and RAG",
+                slug="building-an-autonomous-multi-agent-ai-research-fact-auditing-system-with-langchain-mistral-and-rag",
+                excerpt="A deep breakdown of constructing an asynchronous multi-agent research pipeline that crawls the web, sanitizes DOMs, drafts comprehensive technical reports, audits facts, and indexes vectors into Pinecone & ChromaDB.",
+                content="![Multi-Agent Research Hero Banner](multiagent-hero)\n\n# Before We Start \u2014 Why Single-Prompt LLMs Fail at Deep Research\n\nAsk ChatGPT or any standard LLM to write a comprehensive technical research report on a complex topic like *\"Advances in Fusion Reactor Core Containment\"*.\n\nYou will usually get a generic 5-paragraph summary. It will sound confident, but it will lack recent domain citations, suffer from knowledge cutoff gaps, miss critical technical nuances, and occasionally hallucinate plausible-sounding statistics.\n\nSingle-prompt LLMs fail at deep research for three fundamental reasons:\n1. **No Real-Time Web Exploration**: They rely on static weights or basic un-sanitized web search snippets.\n2. **No Factual Auditing Loop**: They lack a secondary agent to critique, verify, and score the output.\n3. **Token Context Bloat**: Raw HTML pages clutter context windows with JavaScript scripts, CSS, and navigation headers.\n\nTo solve this, I built the **Multi-Agent AI Research & Fact-Auditing System** \u2014 an asynchronous multi-agent pipeline built on **LangChain**, **FastAPI**, **Mistral AI**, **Tavily**, **BeautifulSoup**, and **Pinecone / ChromaDB**.\n\nThis post breaks down the full architectural flow, real-time SSE streaming telemetry, RAG vector indexing, and key debugging insights.\n\n---\n\n## 1. Multi-Agent Architecture Overview\n\nThe system operates as an asynchronous pipeline governed by five specialized roles:\n\n```text\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502                        User Input (Research Topic)                     \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                                    \u2502\n                                    \u25bc\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502  Search Agent (Tavily Parallel Indexer)                                \u2502\n\u2502  Discovers top 5 high-authority domain URLs and content snippets      \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                                    \u2502\n                                    \u25bc\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502  Reader Agent (DOM Sanitizer & Web Scraper)                            \u2502\n\u2502  Strips script/style/nav tags, normalizes text (max 3,000 chars)       \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                                    \u2502\n                                    \u25bc\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502  Writer Specialist (Synthesis Engine)                                  \u2502\n\u2502  Drafts multi-section markdown paper with citation anchors             \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                                    \u2502\n                                    \u25bc\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502  Review Critic (Quality & Fact Auditor)                                \u2502\n\u2502  Evaluates academic score (X/10), strengths, & areas to improve        \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                                    \u2502\n                                    \u25bc\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502  RAG Knowledge Ingestion Pipeline                                      \u2502\n\u2502  RecursiveCharacterTextSplitter \u2794 Mistral Embeddings \u2794 Pinecone/Chroma \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n```\n\n### Tech Stack\n\n| Component | Technology |\n| :--- | :--- |\n| **Agent Framework** | Python 3.13, LangChain |\n| **LLM Provider** | Mistral AI (`open-mixtral-8x22b`) |\n| **Search Engine API** | Tavily Search Client |\n| **HTML Sanitizer** | BeautifulSoup4 (`bs4`) |\n| **Vector DB (RAG)** | Pinecone Cloud (Primary) / ChromaDB (Local fallback) |\n| **Embeddings** | `MistralAIEmbeddings` (`mistral-embed`) |\n| **Streaming API** | FastAPI ASGI Server with Server-Sent Events (SSE) |\n\n---\n\n## 2. Technical Implementation & Agent Specialization\n\n### Agent 1 \u2014 Search Agent (Tavily Parallel Indexer)\nThe Search Agent uses Tavily API to execute deep domain queries. Instead of grabbing raw HTML for 50 pages, it retrieves top 5 targeted results with clean 300-character normalized snippets.\n\n```python\n@tool\ndef web_search(query: str) -> str:\n    \"\"\"Search the web for recent and reliable technical information on a topic.\"\"\"\n    tavily = TavilyClient(api_key=os.getenv(\"TAVILY_API_KEY\"))\n    response = tavily.search(query=query, max_results=5, search_depth=\"advanced\")\n    \n    results = []\n    for item in response.get(\"results\", []):\n        results.append(f\"Title: {item['title']}\\nURL: {item['url']}\\nSnippet: {item['content']}\\n\")\n    return \"\\n---\\n\".join(results)\n```\n\n### Agent 2 \u2014 Reader Agent (DOM Sanitization & Scraping)\nWhen given a target URL, raw scraping often yields 100KB+ of inline JavaScript, CSS styles, and navigation menus. The Reader Agent uses `BeautifulSoup` with explicit tag decomposition and strict timeout controls:\n\n```python\n@tool\ndef scrape_url(url: str) -> str:\n    \"\"\"Scrape and return clean text content from a given URL.\"\"\"\n    headers = {\"User-Agent\": \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)\"}\n    try:\n        res = requests.get(url, headers=headers, timeout=8)\n        soup = BeautifulSoup(res.text, \"html.parser\")\n        \n        # Decompose non-content nodes\n        for element in soup([\"script\", \"style\", \"nav\", \"footer\", \"header\", \"form\"]):\n            element.decompose()\n            \n        text = soup.get_text(separator=\" \")\n        clean_text = \" \".join(text.split())\n        return clean_text[:3000] # Cap text payload to avoid context bloat\n    except Exception as e:\n        return f\"Error scraping URL: {str(e)}\"\n```\n\n> \ud83d\udca1 **Simple Version:** If a website is a messy newspaper filled with ads, popups, and nav bars, the Reader agent cuts out only the core news article paragraph text and discards all the surrounding clutter.\n\n### Agent 3 \u2014 Review Critic (Quality & Fact Auditor)\nThe Review Critic acts as an un-biased peer reviewer. It evaluates the draft report against strict qualitative standards and outputs structured feedback:\n\n```text\nScore: 8.5/10\n\nStrengths:\n- Clear separation between Tokamak core containment and Stellarator magnet design.\n- Accurate citations of recent 2025 ignition benchmarks.\n\nAreas to Improve:\n- Provide more details on tritium breeding blanket material degradation.\n\nOne line verdict:\nAn exceptionally detailed and well-supported technical summary ready for publication.\n```\n\n---\n\n## 3. Vector Storage & RAG Ingestion Pipeline\n\nOnce the final report is audited, the pipeline automatically ingests it into a RAG (Retrieval-Augmented Generation) knowledge base for future querying.\n\n```python\ndef ingest_report_to_vectorstore(topic: str, report_text: str):\n    # 1. Text Chunking\n    text_splitter = RecursiveCharacterTextSplitter(\n        chunk_size=1000,\n        chunk_overlap=200,\n        separators=[\"\n\n\", \"\n\", \" \", \"\"]\n    )\n    docs = text_splitter.create_documents(\n        texts=[report_text],\n        metadatas=[{\"topic\": topic, \"timestamp\": datetime.utcnow().isoformat()}]\n    )\n    \n    # 2. Embedding Generation & Vector Store Indexing\n    embeddings = MistralAIEmbeddings(model=\"mistral-embed\")\n    \n    if os.getenv(\"PINECONE_API_KEY\"):\n        # Index to Pinecone Cloud\n        vectorstore = PineconeVectorStore.from_documents(\n            documents=docs,\n            embedding=embeddings,\n            index_name=os.getenv(\"PINECONE_INDEX_NAME\")\n        )\n    else:\n        # Fallback to local ChromaDB\n        vectorstore = Chroma.from_documents(\n            documents=docs,\n            embedding=embeddings,\n            persist_directory=\"./data/chroma_db\"\n        )\n    return vectorstore\n```\n\n---\n\n## 4. Real-Time Telemetry & SSE Streaming\n\nRather than making the user wait 45 seconds staring at a blank screen, the FastAPI backend (`server.py`) streams live execution logs via **Server-Sent Events (SSE)** over `/api/research`:\n\n```python\n@app.get(\"/api/research\")\nasync def stream_research(topic: str):\n    async def event_generator():\n        # Pipeline generator yields state events\n        for event in run_research_pipeline_generator(topic):\n            event_type = event[\"type\"] # e.g. \"search_start\", \"scraped_data\", \"report_draft\"\n            data_payload = json.dumps(event[\"data\"])\n            yield f\"event: {event_type}\ndata: {data_payload}\n\n\"\n            \n    return StreamingResponse(event_generator(), media_type=\"text/event-stream\")\n```\n\n---\n\n## 5. Real Engineering Bugs & Hard Lessons\n\n### Bug 1 \u2014 Context Window Bloat from Un-sanitized Heavy SPAs\n- **Symptom**: The Writer Agent crashed with `InvalidRequestError: maximum context length exceeded`.\n- **Root Cause**: Scraped single-page application (SPA) websites returned 150KB of inline JSON-LD state scripts embedded inside `<script id=\"__NEXT_DATA__\">` tags. Plain regex string stripping missed nested tags.\n- **Fix**: Added explicit `soup([\"script\", \"style\", \"nav\", \"footer\"]).decompose()` calls before calling `get_text()`, and hard-capped clean text output to 3,000 characters.\n\n### Bug 2 \u2014 SQLite Version Mismatch with ChromaDB on Linux Cloud\n- **Symptom**: Local execution worked on macOS, but Render cloud deployment failed with `RuntimeError: Your system has SQLite 3.31.1, but Chroma requires SQLite >= 3.35.0`.\n- **Root Cause**: Render Linux base image shipped with an older system SQLite library.\n- **Fix**: Injected `pysqlite3` binary override at the top of `rag_store.py`:\n  ```python\n  __import__('pysqlite3')\n  import sys\n  sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')\n  ```\n\n### Bug 3 \u2014 Critic Infinite Refinement Loop\n- **Symptom**: The agent pipeline got stuck in an infinite loop where the Critic repeatedly requested minor stylistic updates.\n- **Fix**: Implemented a hard limit of `max_iterations = 1` for the refinement pass, ensuring deterministic execution times.\n\n---\n\n## 6. Summary of Bugs & Resolutions\n\n| Problem | Root Cause | Engineering Solution |\n| :--- | :--- | :--- |\n| **Context length exceeded** | Heavy inline `<script>` tags in DOM | Decomposition of script nodes + 3k char truncation |\n| **ChromaDB SQLite error** | Linux system SQLite version too old | Injected `pysqlite3` override into `sys.modules` |\n| **Infinite agent loop** | Critic repeatedly requesting minor edits | Added max iteration cap and terminal score threshold |\n| **Pinecone connection timeout** | Cloud API socket latency on startup | Implemented local ChromaDB automatic fallback |\n\n---\n\n## 7. Key Takeaways & Resources\n\n- **DOM Sanitization is non-negotiable for AI scraping**: Never feed raw web markup into an LLM without decomposing scripts and styles first.\n- **SSE Streaming improves UX dramatically**: Streaming intermediate agent states keeps users engaged during long multi-step workflows.\n- **Hybrid Cloud/Local RAG fallbacks ensure uptime**: Designing local ChromaDB fallback ensures vector search works even when cloud vector services are unreachable.\n\n- **GitHub Repository**: [github.com/shlokbam/Multi_Agent_AI_Research_System](https://github.com/shlokbam/Multi_Agent_AI_Research_System)\n- **Tavily API Specs**: [tavily.com](https://tavily.com)\n",
+                content_type="BUILD",
+                category="AI / ML",
+                reading_time="22 min read",
+                status="PUBLISHED",
+                featured=True,
+                published_at="2026-05-20",
+                cover_image="https://images.unsplash.com/photo-1677442136019-21780efad99a?q=80&w=1000&auto=format&fit=crop",
+                author="Shlok Bam",
+                project_slug=null,
+                github_repo="shlokbam/Multi_Agent_AI_Research_System",
+                tags=tags_6
+            )
+            db.add(post_6)
+            db.commit()
+
+        # Seed designing-a-real-time-enterprise-inventory-system-with-fifo-stock-reduction-automated-pdf-invoicing-and-telegram-webhooks
+        existing_7 = db.query(Post).filter(Post.slug == "designing-a-real-time-enterprise-inventory-system-with-fifo-stock-reduction-automated-pdf-invoicing-and-telegram-webhooks").first()
+        if not existing_7:
+        tags_7 = []
+        t_fastapi = db.query(Tag).filter(Tag.name == "FastAPI").first()
+        if not t_fastapi:
+            t_fastapi = Tag(name="FastAPI", slug="fastapi")
+            db.add(t_fastapi)
+            db.commit()
+        tags_7.append(t_fastapi)
+        t_postgresql = db.query(Tag).filter(Tag.name == "PostgreSQL").first()
+        if not t_postgresql:
+            t_postgresql = Tag(name="PostgreSQL", slug="postgresql")
+            db.add(t_postgresql)
+            db.commit()
+        tags_7.append(t_postgresql)
+        t_react = db.query(Tag).filter(Tag.name == "React").first()
+        if not t_react:
+            t_react = Tag(name="React", slug="react")
+            db.add(t_react)
+            db.commit()
+        tags_7.append(t_react)
+        t_python = db.query(Tag).filter(Tag.name == "Python").first()
+        if not t_python:
+            t_python = Tag(name="Python", slug="python")
+            db.add(t_python)
+            db.commit()
+        tags_7.append(t_python)
+        t_docker = db.query(Tag).filter(Tag.name == "Docker").first()
+        if not t_docker:
+            t_docker = Tag(name="Docker", slug="docker")
+            db.add(t_docker)
+            db.commit()
+        tags_7.append(t_docker)
+
+            post_7 = Post(
+                title="Designing a Real-Time Enterprise Inventory System with FIFO Stock Reduction, Automated PDF Invoicing, and Telegram Webhooks",
+                slug="designing-a-real-time-enterprise-inventory-system-with-fifo-stock-reduction-automated-pdf-invoicing-and-telegram-webhooks",
+                excerpt="An architectural deep dive into building an enterprise inventory system featuring FIFO batch allocation, concurrency-safe PostgreSQL transactions, ReportLab PDF generation, and instant customer Telegram alerts.",
+                content="![Inventory System Hero Banner](inventory-hero)\n\n# Before We Start \u2014 The Problem with Traditional Inventory Software\n\nManaging inventory for small and medium retail businesses is deceptively complex. Most existing software solutions either fall into two extremes:\n1. **Overly bloated ERP systems**: Costing thousands of dollars with complex interfaces that require weeks of staff training.\n2. **Fragile Excel spreadsheets**: Prone to accidental overwrites, missing real-time stock deductions, zero concurrency control, and zero automated customer billing.\n\nThe biggest operational headaches stem from three real-world challenges:\n- **Managing Batch Expiry & Stock Deduction**: Products arrive in different shipment batches with different cost prices and expiration dates. Deducting stock manually leads to expired goods sitting on shelves.\n- **Customer Ledger & Pending Debt (\"Udhari\")**: Tracking partial payments and outstanding balances across regular customers without payment disputes.\n- **Instant Receipts**: Generating professional PDF invoices on the fly and sending them immediately to customer mobile devices.\n\nTo solve this, I designed and built the **Inventory Management System (IMS)** \u2014 a full-stack platform built with **FastAPI**, **SQLAlchemy**, **PostgreSQL (Neon.tech)**, **React (Vite + TailwindCSS)**, **ReportLab**, and **Telegram Bot API**.\n\nThis post dives deep into the architecture, FIFO stock reduction algorithm, transactional concurrency locks, PDF generation, and automated Telegram webhooks.\n\n---\n\n## 1. System Architecture & Entity Relationships\n\nThe core architecture follows a decoupled model:\n\n```text\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502               React + Vite Frontend (TailwindCSS + Recharts)           \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                                    \u2502\n                                    \u2502 HTTP REST API (JWT Auth)\n                                    \u25bc\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502                   FastAPI Backend (Python 3.12)                        \u2502\n\u2502  \u251c\u2500\u2500 /routers/products.py     \u251c\u2500\u2500 /services/stock_service.py           \u2502\n\u2502  \u251c\u2500\u2500 /routers/transactions.py \u251c\u2500\u2500 /services/telegram_service.py        \u2502\n\u2502  \u2514\u2500\u2500 /routers/invoices.py     \u2514\u2500\u2500 /auth.py (JWT & Passlib)            \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                                    \u2502\n               \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n               \u25bc                                         \u25bc\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510        \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502  PostgreSQL (Neon Cloud)     \u2502        \u2502  Telegram Bot API (@BotFather) \u2502\n\u2502  Products, Batches, Customers\u2502        \u2502  Dispatches PDFs & Notifications\u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518        \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n```\n\n### Database Entity-Relationship (ER) Model\n\nThe database schema is designed to enforce relational integrity and auditability:\n\n```text\n  \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510          \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510          \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n  \u2502  Categories  \u25021        N\u2502   Products   \u25021        N\u2502   Batches    \u2502\n  \u2502\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2502\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2502\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2502\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2502\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2502\n  \u2502 id (PK)      \u2502          \u2502 id (PK)      \u2502          \u2502 id (PK)      \u2502\n  \u2502 name         \u2502          \u2502 category_id  \u2502          \u2502 product_id   \u2502\n  \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518          \u2502 min_stock    \u2502          \u2502 qty_remaining\u2502\n                            \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518          \u2502 expiry_date  \u2502\n                                   \u25021                 \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                                   \u2502\n                                   \u2502N\n                            \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n                            \u2502 Transaction  \u2502\n                            \u2502    Items     \u2502\n                            \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n```\n\n---\n\n## 2. The FIFO (First-In-First-Out) Stock Reduction Engine\n\nWhen a customer buys 50 units of a product, those 50 units shouldn't be deducted arbitrarily. To prevent inventory spoilage, the system must deduct stock from the **oldest available batch** first (**FIFO**). If the oldest batch only has 20 units, the system must exhaust those 20 units, close the batch, and deduct the remaining 30 units from the next oldest batch.\n\nHere is the implementation in `app/services/stock_service.py`:\n\n```python\ndef deduct_stock_fifo(db: Session, product_id: int, quantity_to_deduct: int) -> list[dict]:\n    # 1. Query active batches ordered by oldest creation / expiration date\n    # Lock rows for update to prevent concurrent race conditions\n    batches = (\n        db.query(Batch)\n        .filter(Batch.product_id == product_id, Batch.quantity_remaining > 0)\n        .order_by(Batch.created_at.asc())\n        .with_for_update()\n        .all()\n    )\n    \n    total_available = sum(b.quantity_remaining for b in batches)\n    if total_available < quantity_to_deduct:\n        raise HTTPException(\n            status_code=400,\n            detail=f\"Insufficient stock! Requested: {quantity_to_deduct}, Available: {total_available}\"\n        )\n        \n    deductions = []\n    remaining_needed = quantity_to_deduct\n    \n    for batch in batches:\n        if remaining_needed <= 0:\n            break\n            \n        take_amount = min(batch.quantity_remaining, remaining_needed)\n        batch.quantity_remaining -= take_amount\n        remaining_needed -= take_amount\n        \n        deductions.append({\n            \"batch_id\": batch.id,\n            \"quantity_deducted\": take_amount,\n            \"cost_price\": batch.cost_price\n        })\n        \n    db.flush() # Persist state within current transaction block\n    return deductions\n```\n\n> \ud83d\udca1 **Simple Version:** Imagine a grocery store shelf with milk cartons. The FIFO engine forces the cashier to sell milk with the earliest expiration date first. If a customer buys 3 cartons and only 1 carton remains in the front row, the engine takes 1 carton from the front and 2 cartons from the new shipment behind it.\n\n---\n\n## 3. Customer Ledger & Pending Debt (\"Udhari\") Tracking\n\nIn real-world retail, regular business customers rarely pay 100% upfront. They make partial payments, accumulating pending balances.\n\nThe system maintains a real-time ledger on the `Customer` model:\n- `total_purchased`: Cumulative financial value of all orders.\n- `total_paid`: Total payments collected.\n- `pending_balance`: `total_purchased - total_paid`.\n\nWhen a new transaction occurs:\n```python\ncustomer = db.query(Customer).filter(Customer.id == customer_id).with_for_update().first()\ncustomer.total_purchased += grand_total\ncustomer.total_paid += amount_paid\ncustomer.pending_balance = customer.total_purchased - customer.total_paid\ndb.commit()\n```\n\nIf `pending_balance > 0`, the customer's profile is tagged with a warning badge on the React UI, displaying their pending balance and past payment history.\n\n---\n\n## 4. Automated PDF Invoices & Telegram Webhook Alerts\n\n### 1. PDF Invoice Generation (`invoices.py`)\nUsing **ReportLab**, the system generates clean, formatted PDF invoices directly in memory (`io.BytesIO`) without writing temporary files to disk:\n\n```python\ndef generate_invoice_pdf(transaction: Transaction) -> io.BytesIO:\n    buffer = io.BytesIO()\n    doc = SimpleDocTemplate(buffer, pagesize=letter, leftMargin=36, rightMargin=36)\n    story = []\n    \n    # Invoice Header & Customer Info Table\n    story.append(Paragraph(f\"INVOICE #{transaction.id}\", title_style))\n    story.append(Spacer(1, 12))\n    \n    # Items Table (Product, Quantity, Unit Price, Total)\n    table_data = [[\"Product\", \"Qty\", \"Price\", \"Total\"]]\n    for item in transaction.items:\n        table_data.append([\n            item.product.name,\n            str(item.quantity),\n            f\"${item.unit_price:.2f}\",\n            f\"${item.subtotal:.2f}\"\n        ])\n        \n    story.append(Table(table_data, style=table_grid_style))\n    doc.build(story)\n    buffer.seek(0)\n    return buffer\n```\n\n### 2. Telegram Bot Integration (`telegram_service.py`)\nWhen a sale completes, FastAPI triggers a background task that sends a text summary and PDF attachment directly to the customer's or manager's Telegram chat:\n\n```python\nasync def send_telegram_invoice(chat_id: str, pdf_bytes: io.BytesIO, caption: str):\n    url = f\"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/sendDocument\"\n    files = {\"document\": (\"invoice.pdf\", pdf_bytes, \"application/pdf\")}\n    data = {\"chat_id\": chat_id, \"caption\": caption}\n    \n    async with httpx.AsyncClient() as client:\n        await client.post(url, data=data, files=files)\n```\n\n---\n\n## 5. Real Engineering Bugs & Hard Lessons\n\n### Bug 1 \u2014 Concurrent Race Condition on Low Stock\n- **Symptom**: Two cashiers checking out at the exact same second for a product with 10 remaining units both succeeded. Stock dropped to `-10`.\n- **Root Cause**: Default `db.query(Batch)` execution did not lock database rows. Both API requests read `quantity_remaining = 10` simultaneously before either commit finished.\n- **Fix**: Added `.with_for_update()` to SELECT queries in `stock_service.py`. This forces PostgreSQL to acquire a pessimistic row lock until the transaction commits.\n\n### Bug 2 \u2014 Floating Point Currency Rounding Errors\n- **Symptom**: An invoice subtotal calculated as `$19.990000000000002` instead of `$19.99`.\n- **Root Cause**: Standard Python IEEE 754 floating-point arithmetic imprecision.\n- **Fix**: Standardized all currency models to `Decimal` in Python and `NUMERIC(10, 2)` in PostgreSQL schema, rounding explicit totals with `ROUND(val, 2)`.\n\n### Bug 3 \u2014 ReportLab Text Table Overflow\n- **Symptom**: Long product titles (e.g. *\"Heavy Duty Industrial Galvanized Steel Pipe 20mm\"*) overflowed table columns and got truncated outside the PDF page boundary.\n- **Root Cause**: Plain string cells inside ReportLab `Table` do not auto-wrap.\n- **Fix**: Wrapped string values inside `Paragraph(text, cell_style)` flowable objects with explicit column width constraints.\n\n---\n\n## 6. Summary of Bugs & Resolutions\n\n| Problem | Root Cause | Engineering Solution |\n| :--- | :--- | :--- |\n| **Negative inventory stock** | Unlocked concurrent DB queries | Applied `.with_for_update()` pessimistic row locks |\n| **Currency `$19.99000002` error** | Python float arithmetic | Converted database & schemas to `Decimal` / `NUMERIC(10,2)` |\n| **PDF table text truncation** | ReportLab Table plain text cells | Wrapped text strings inside `Paragraph` flowables |\n| **Telegram API timeout** | Synchronous HTTP calls blocking main thread | Offloaded Telegram send routine to FastAPI `BackgroundTasks` |\n\n---\n\n## 7. Key Takeaways & Resources\n\n- **Pessimistic locking is essential for stock management**: Never rely on application-level checks alone for shared inventory quantities. Use database row locks (`FOR UPDATE`).\n- **Use exact decimal types for money**: Never store financial amounts as floating-point numbers.\n- **In-memory PDF generation saves disk I/O**: Generating PDFs using `io.BytesIO` avoids temporary file cleanup and disk write bottlenecks.\n\n- **GitHub Repository**: [github.com/shlokbam/Inventory_Management_System](https://github.com/shlokbam/Inventory_Management_System)\n- **FastAPI Documentation**: [fastapi.tiangolo.com](https://fastapi.tiangolo.com)\n- **ReportLab User Guide**: [reportlab.com](https://www.reportlab.com)\n",
+                content_type="BUILD",
+                category="Software Architecture",
+                reading_time="20 min read",
+                status="PUBLISHED",
+                featured=True,
+                published_at="2026-07-05",
+                cover_image="https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?q=80&w=1000&auto=format&fit=crop",
+                author="Shlok Bam",
+                project_slug=null,
+                github_repo="shlokbam/Inventory_Management_System",
+                tags=tags_7
+            )
+            db.add(post_7)
+            db.commit()
+
+        # Seed mastering-infrastructure-as-code-configuration-management-terraform-ansible-lab
+        existing_8 = db.query(Post).filter(Post.slug == "mastering-infrastructure-as-code-configuration-management-terraform-ansible-lab").first()
+        if not existing_8:
+        tags_8 = []
+        t_terraform = db.query(Tag).filter(Tag.name == "Terraform").first()
+        if not t_terraform:
+            t_terraform = Tag(name="Terraform", slug="terraform")
+            db.add(t_terraform)
+            db.commit()
+        tags_8.append(t_terraform)
+        t_ansible = db.query(Tag).filter(Tag.name == "Ansible").first()
+        if not t_ansible:
+            t_ansible = Tag(name="Ansible", slug="ansible")
+            db.add(t_ansible)
+            db.commit()
+        tags_8.append(t_ansible)
+        t_devops = db.query(Tag).filter(Tag.name == "DevOps").first()
+        if not t_devops:
+            t_devops = Tag(name="DevOps", slug="devops")
+            db.add(t_devops)
+            db.commit()
+        tags_8.append(t_devops)
+        t_aws = db.query(Tag).filter(Tag.name == "AWS").first()
+        if not t_aws:
+            t_aws = Tag(name="AWS", slug="aws")
+            db.add(t_aws)
+            db.commit()
+        tags_8.append(t_aws)
+        t_docker = db.query(Tag).filter(Tag.name == "Docker").first()
+        if not t_docker:
+            t_docker = Tag(name="Docker", slug="docker")
+            db.add(t_docker)
+            db.commit()
+        tags_8.append(t_docker)
+
+            post_8 = Post(
+                title="Mastering Infrastructure as Code & Configuration Management: My Practice Guide on Terraform, Ansible, and Multi-Cloud Orchestration",
+                slug="mastering-infrastructure-as-code-configuration-management-terraform-ansible-lab",
+                excerpt="An in-depth learning breakdown of declarative infrastructure provisioning with Terraform, automated server configuration with Ansible playbooks, and secure secret management.",
+                content="![DevOps Terraform & Ansible Lab Hero](devops-hero)\n\n# Introduction \u2014 Transitioning from Imperative Cloud Setup to Declarative Systems\n\nWhen I first started managing cloud infrastructure on AWS, my workflow was completely imperative: log into the AWS Management Console, manually click through the EC2 launch wizard, select an AMI, choose instance sizes, attach security groups, download `.pem` key pairs, and SSH into the machine to execute `apt-get install` commands line by line.\n\nWhile this works for trivial side projects, it fails catastrophically in production. Manual infrastructure management is prone to configuration drift, human error, lack of auditability, and zero repeatability. If a cloud region goes down, recreating that exact environment manually takes hours of stressful guesswork.\n\nTo bridge the gap between theory and enterprise infrastructure engineering, I designed and executed a multi-tier infrastructure automation lab using **Terraform** for declarative cloud provisioning and **Ansible** for idempotent configuration management. \n\nThis guide encapsulates everything I learned and practiced: the underlying mechanics of Infrastructure as Code (IaC), state file management, dynamic inventory generation, playbook idempotency, and the architectural handoff between infrastructure provisioning and server configuration.\n\n---\n\n## 1. The Two Pillars of IaC: Provisioning vs. Configuration Management\n\nA common point of confusion when learning DevOps is understanding the distinction between **Infrastructure Provisioners** (like Terraform) and **Configuration Managers** (like Ansible). While their capabilities occasionally overlap, they solve fundamentally different problems.\n\n```text\n                               THE IAC TWO-STAGE PIPELINE\n                               \n \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510         \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n \u2502     TERRAFORM (PROVISION)      \u2502         \u2502     ANSIBLE (CONFIGURE)        \u2502\n \u2502  \u2022 Declarative State Engine    \u2502         \u2502  \u2022 Agentless Push over SSH     \u2502\n \u2502  \u2022 Creates VPC, Subnets, EC2   \u2502 \u2500\u2500\u2500\u2500\u2500\u2500\u25ba \u2502  \u2022 Installs Docker/Nginx/Node  \u2502\n \u2502  \u2022 Builds Security Groups      \u2502  IPs    \u2502  \u2022 Deploys Application Configs \u2502\n \u2502  \u2022 Tracks Cloud Resources DAG  \u2502         \u2502  \u2022 Enforces Idempotent State   \u2502\n \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518         \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n```\n\n### Terraform: The Immutable Provisioner\nTerraform operates on a **declarative paradigm**. You specify *what* cloud resources you want (e.g., \"I need a VPC with 2 public subnets, an Internet Gateway, and an EC2 instance of type t3.micro\"), and Terraform calculates the optimal dependency graph required to reach that target state.\n\n- **Primary Goal**: Allocating and managing cloud infrastructure primitives (VPCs, Security Groups, EC2 instances, S3 buckets, IAM roles).\n- **Execution Model**: State-driven dependency graph execution.\n- **Philosophy**: Immutable infrastructure (destroy and recreate resources when drift occurs).\n\n### Ansible: The Idempotent Configuration Manager\nAnsible, on the other hand, excels at **software configuration management** and application deployment once the virtual machines are running. \n\n- **Primary Goal**: Software installation, package updates, configuration file templating (Jinja2), user account setup, and service orchestration.\n- **Execution Model**: Sequential playbook execution over SSH (agentless).\n- **Philosophy**: Idempotency \u2014 executing the same playbook once or one hundred times yields the exact same end state without side effects.\n\n---\n\n## 2. Deep-Dive into Terraform Architecture & State Engine\n\n### The Directed Acyclic Graph (DAG)\nUnder the hood, Terraform parses all `.tf` files in your workspace, builds a internal **Directed Acyclic Graph (DAG)** of all resources, and evaluates dependencies. For example, an `aws_instance` implicitly depends on `aws_security_group`, which in turn depends on `aws_vpc`. Terraform uses this graph to execute non-dependent resource creations in parallel, drastically speeding up provisioning.\n\n### State Management & Remote Lock Backends\nThe single most critical concept in Terraform is the **State File** (`terraform.tfstate`). The state file maps declared Terraform resources to real-world cloud API resource IDs.\n\nWhen practicing in team environments or CI/CD pipelines, storing local `terraform.tfstate` files on disk is a severe antipattern that causes state corruption and race conditions. I configured a remote backend architecture using **AWS S3** for persistent state storage and **AWS DynamoDB** for state locking.\n\n```text\n                        REMOTE STATE & LOCKING ARCHITECTURE\n                        \n    Developer / CI          State Read/Write           AWS S3 Bucket\n  \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u25ba    \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n  \u2502  Terraform CLI   \u2502                              \u2502 terraform.tfstate\u2502\n  \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518    \u25c4\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500    \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n           \u2502                State Data Sync\n           \u2502\n           \u2502 Acquire Lock / Release Lock\n           \u25bc\n  \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n  \u2502  AWS DynamoDB    \u2502  (Prevents simultaneous modifications)\n  \u2502  Locking Table   \u2502\n  \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n```\n\n1. **Lock Acquisition**: Before any `apply` or `plan` operation, Terraform writes a lock key to the DynamoDB table containing the user ARN and execution timestamp.\n2. **State Pull**: Terraform reads the latest state snapshot from S3.\n3. **Diff Calculation**: Terraform compares the remote state against the real cloud infrastructure and your local `.tf` code.\n4. **Execution & Release**: Once changes are applied, the state is updated in S3 and the DynamoDB lock is released.\n\n### Workspace Isolation\nTo manage multi-environment infrastructure (Dev, Staging, Production) without duplicating configuration code, I practiced using **Terraform Workspaces**. Each workspace isolates its state file into an S3 prefix key (`env:/dev/terraform.tfstate`, `env:/prod/terraform.tfstate`), allowing the exact same module code to provision distinct environments with variable-driven sizing.\n\n```hcl\n# Remote Backend Configuration with S3 & DynamoDB State Locking\nterraform {\n  backend \"s3\" {\n    bucket         = \"my-terraform-lab-state-bucket\"\n    key            = \"devops-lab/terraform.tfstate\"\n    region         = \"us-east-1\"\n    dynamodb_table = \"terraform-state-locks\"\n    encrypt        = true\n  }\n}\n```\n\n---\n\n## 3. Deep-Dive into Ansible Architecture & Idempotency\n\n### Agentless Push Paradigm\nUnlike other configuration tools (such as Chef or Puppet) that require a background agent daemon running on target nodes, Ansible is entirely **agentless**. It connects to target instances via standard **SSH** (or WinRM for Windows), transfers temporary Python execution modules, runs them on the host, and removes them afterwards.\n\n### The Anatomy of an Idempotent Task\nIdempotency is Ansible's core guarantee. If a task states `state: present` for a package, Ansible first checks if the package is already installed at the target version. If yes, it marks the task `OK` and skips execution. If no, it installs the package and marks the task `CHANGED`.\n\n```yaml\n# Example Ansible Playbook Task with Idempotency & Handlers\n- name: Install and configure Nginx web server\n  hosts: webservers\n  become: yes\n  tasks:\n    - name: Ensure Nginx is installed\n      apt:\n        name: nginx\n        state: present\n        update_cache: yes\n\n    - name: Copy Nginx custom configuration from template\n      template:\n        src: templates/nginx.conf.j2\n        dest: /etc/nginx/nginx.conf\n        owner: root\n        group: root\n        mode: '0644'\n      notify: Restart Nginx Service\n\n  handlers:\n    - name: Restart Nginx Service\n      service:\n        name: nginx\n        state: restarted\n```\n\n### Handlers & Event-Driven Triggers\nIn the snippet above, the `handlers` directive demonstrates event-driven efficiency. Restarting a web server is an expensive operation. By attaching a `notify` trigger to the configuration file task, Nginx is restarted *only* when the configuration template content actually changes \u2014 not on every playbook run.\n\n---\n\n## 4. The Integrated Execution Workflow: Terraform to Ansible Handoff\n\nOne of the biggest practical hurdles in DevOps is connecting Terraform's output to Ansible's input. When Terraform provisions dynamic EC2 instances, their IP addresses are unknown until runtime.\n\nI practiced three distinct strategies for the handoff:\n\n1. **Terraform Local-Exec Invocation**: Using Terraform `local-exec` provisioners to trigger an `ansible-playbook` command immediately after resource creation.\n2. **Dynamic Inventory Plugins (`aws_ec2`)**: Utilizing Ansible's native `amazon.aws.aws_ec2` inventory plugin to query AWS EC2 tags (e.g., `Environment=Dev`, `Role=Web`) in real time, automatically building host groups without manual IP entry.\n3. **CI/CD Pipeline Orchestration**: Using a GitHub Actions or Jenkins pipeline step to extract Terraform JSON outputs (`terraform output -json`) and pass them as extra variables (`--extra-vars`) to Ansible.\n\n---\n\n## 5. Lessons Learned, Gotchas, and Best Practices\n\nThrough hands-on trial and error across this lab, I encountered several real-world operational failure modes:\n\n### Gotcha 1: The SSH Readiness Race Condition\nWhen Terraform finishes creating an EC2 instance, AWS reports the instance state as `running`. However, the underlying virtual machine is still executing cloud-init scripts, initializing SSH host keys, and starting `sshd`. If Ansible attempts to connect immediately, connection attempts fail with `Connection Refused`.\n- **Solution**: Incorporating Ansible's `wait_for` module or Terraform's `remote-exec` connectivity checks before executing configuration playbooks.\n\n### Gotcha 2: Configuration & State Drift\nIf a team member manually edits a Security Group rule in the AWS Console, Terraform's next `plan` will flag this as configuration drift and attempt to revert it.\n- **Takeaway**: Enforcement of strict IAM policies restricting manual console edits. All cloud modifications must flow through git commits and Terraform execution pipelines.\n\n### Gotcha 3: Secret Management in State & Playbooks\nBoth Terraform state files and raw Ansible playbooks can accidentally expose plaintext database passwords and API tokens.\n- **Solution**: Integrating **HashiCorp Vault** or **Ansible Vault** (`ansible-vault encrypt`) to encrypt sensitive variables at rest, decrypting them in memory only during playbook execution.\n\n---\n\n## Summary & Key Takeaways\n\n1. **Use the Right Tool for the Job**: Let Terraform handle immutable cloud resource allocation; let Ansible manage OS configuration, package installations, and software setup.\n2. **State is Sacred**: Never store `terraform.tfstate` locally. Always use remote backends (S3) with atomic state locking (DynamoDB).\n3. **Embrace Idempotency**: Design Ansible playbooks so they can be run repeatedly without altering existing valid system states.\n4. **Automate the Handoff**: Use dynamic inventory plugins (`aws_ec2`) to decouple configuration scripts from static IP addresses.\n",
+                content_type="LEARN",
+                category="DevOps",
+                reading_time="18 min read",
+                status="PUBLISHED",
+                featured=True,
+                published_at="2026-08-01",
+                cover_image="https://images.unsplash.com/photo-1517694712202-14dd9538aa97?q=80&w=1000&auto=format&fit=crop",
+                author="Shlok Bam",
+                project_slug=null,
+                github_repo="shlokbam/Devops-Terraform-Ansible-Lab",
+                tags=tags_8
+            )
+            db.add(post_8)
+            db.commit()
+
+        # Seed demystifying-model-context-protocol-mcp-architecture-json-rpc-specifications-tool-servers
+        existing_9 = db.query(Post).filter(Post.slug == "demystifying-model-context-protocol-mcp-architecture-json-rpc-specifications-tool-servers").first()
+        if not existing_9:
+        tags_9 = []
+        t_mcp = db.query(Tag).filter(Tag.name == "MCP").first()
+        if not t_mcp:
+            t_mcp = Tag(name="MCP", slug="mcp")
+            db.add(t_mcp)
+            db.commit()
+        tags_9.append(t_mcp)
+        t_ai = db.query(Tag).filter(Tag.name == "AI").first()
+        if not t_ai:
+            t_ai = Tag(name="AI", slug="ai")
+            db.add(t_ai)
+            db.commit()
+        tags_9.append(t_ai)
+        t_python = db.query(Tag).filter(Tag.name == "Python").first()
+        if not t_python:
+            t_python = Tag(name="Python", slug="python")
+            db.add(t_python)
+            db.commit()
+        tags_9.append(t_python)
+        t_json-rpc = db.query(Tag).filter(Tag.name == "JSON-RPC").first()
+        if not t_json-rpc:
+            t_json-rpc = Tag(name="JSON-RPC", slug="json-rpc")
+            db.add(t_json-rpc)
+            db.commit()
+        tags_9.append(t_json-rpc)
+        t_fastmcp = db.query(Tag).filter(Tag.name == "FastMCP").first()
+        if not t_fastmcp:
+            t_fastmcp = Tag(name="FastMCP", slug="fastmcp")
+            db.add(t_fastmcp)
+            db.commit()
+        tags_9.append(t_fastmcp)
+
+            post_9 = Post(
+                title="Demystifying the Model Context Protocol (MCP): Architecture, JSON-RPC Specifications, and Building Extensible AI Tool Servers",
+                slug="demystifying-model-context-protocol-mcp-architecture-json-rpc-specifications-tool-servers",
+                excerpt="A comprehensive architectural study of Anthropic's Model Context Protocol (MCP) \u2014 understanding client-server communication, JSON-RPC schemas, FastMCP SDKs, and secure context injection.",
+                content="![MCP Model Context Protocol Hero](mcp-hero)\n\n# Introduction \u2014 The Fragmented Context Problem in Modern AI Applications\n\nAs Large Language Models (LLMs) have evolved from simple text completion engines into interactive reasoning agents, the single biggest bottleneck in developer productivity has been **context integration**.\n\nHistorically, if you wanted an LLM inside an IDE or chat assistant to query your local SQLite database, search your company's Jira board, inspect a Git repository, and execute terminal commands, you had to write custom API wrappers, proprietary tool schemas, and bespoke system prompts for every single AI platform (OpenAI Function Calling, Anthropic Tools, LangChain Tools, LlamaIndex Data Connectors).\n\nThis fragmented approach led to massive duplication of effort, security vulnerabilities, and vendor lock-in. \n\nTo solve this, Anthropic open-sourced the **Model Context Protocol (MCP)** \u2014 a universal, open standard for connecting AI hosts (clients) to external data sources, tools, and prompts (servers).\n\nI built a dedicated hands-on learning lab to study MCP from the ground up: exploring its underlying **JSON-RPC 2.0 protocol**, understanding **Stdio vs SSE transport mechanisms**, and building custom **FastMCP** tool servers in Python. Here is my complete deep-dive breakdown.\n\n---\n\n## 1. What is MCP? The Client-Host-Server Architecture\n\nThe Model Context Protocol is modeled after the highly successful **Language Server Protocol (LSP)**, which revolutionized code editors by decoupling language intelligence (autocompletion, linting, diagnostics) from the editor interface itself.\n\nIn MCP, the architecture is split into three clean layers:\n\n```text\n                        MODEL CONTEXT PROTOCOL (MCP) ARCHITECTURE\n                        \n \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n \u2502                                 MCP HOST                                    \u2502\n \u2502       (e.g., Claude Desktop, Cursor IDE, Custom LangGraph Agent)           \u2502\n \u2502                                                                             \u2502\n \u2502    \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510         \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510      \u2502\n \u2502    \u2502       MCP CLIENT 1        \u2502         \u2502       MCP CLIENT 2        \u2502      \u2502\n \u2502    \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518         \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518      \u2502\n \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                    \u2502                                     \u2502\n           JSON-RPC 2.0 over Stdio               JSON-RPC 2.0 over SSE/HTTP\n                    \u2502                                     \u2502\n                    \u25bc                                     \u25bc\n \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510   \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n \u2502            MCP SERVER             \u2502   \u2502            MCP SERVER             \u2502\n \u2502   (SQLite Expense Tracker Tool)   \u2502   \u2502     (GitHub / Jira Integrator)    \u2502\n \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518   \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n```\n\n1. **MCP Host**: The user-facing application (e.g., Claude Desktop, Cursor, or an autonomous AI agent framework) that coordinates LLM interactions.\n2. **MCP Client**: Internal protocol instances maintained by the host. Each client maintains a 1-to-1 connection with a specific MCP Server.\n3. **MCP Server**: Lightweight, decoupled microservices or local executable programs that expose tools, resources, and prompt templates to the client.\n\n---\n\n## 2. The Core Primitives of MCP\n\nMCP defines three primary capabilities that a server can expose to an AI client:\n\n```text\n \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n \u2502                            THE THREE MCP PRIMITIVES                         \u2502\n \u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524\n \u2502    PRIMITIVE     \u2502          TYPE             \u2502          DESCRIPTION         \u2502\n \u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524\n \u2502  1. TOOLS        \u2502 Executable Actions        \u2502 Functions LLMs can invoke    \u2502\n \u2502                  \u2502 (Side Effects Allowed)    \u2502 (e.g. run SQL query, send    \u2502\n \u2502                  \u2502                           \u2502 email, create Jira ticket).   \u2502\n \u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524\n \u2502  2. RESOURCES    \u2502 Passive Data Streams      \u2502 File contents, logs, API     \u2502\n \u2502                  \u2502 (Read-Only Context)       \u2502 responses attached to prompt \u2502\n \u2502                  \u2502                           \u2502 context (`file://`, `db://`).\u2502\n \u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524\n \u2502  3. PROMPTS      \u2502 Pre-engineered Templates  \u2502 Reusable prompt shortcuts    \u2502\n \u2502                  \u2502 (User-Initiated Workflows)\u2502 parameterized by server logic\u2502\n \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n```\n\n### 1. Tools (Action Execution)\nTools are executable functions provided by the MCP server that the LLM can decide to call. Each tool exposes a name, a human-readable description, and a JSON Schema defining its input arguments. Tools can perform side effects (writing to a database, triggering a webhook, executing code).\n\n### 2. Resources (Context Injection)\nResources act like passive data endpoints (similar to HTTP GET routes). They allow an MCP server to expose file contents, application logs, database schemas, or API payloads directly to the host application using standard URI schemes (`file:///logs/app.log`, `sqlite://expenses/schema`). Resources are read-only and carry no side effects.\n\n### 3. Prompts (Reusable Workflows)\nPrompts allow servers to offer pre-packaged system instructions and template shortcuts directly to users inside the host application interface (e.g., a \"Summarize Git Commit History\" prompt option provided by a Git MCP server).\n\n---\n\n## 3. Protocol Mechanics: JSON-RPC 2.0 & Transports\n\nUnderneath the high-level Python and TypeScript SDKs, MCP operates entirely via **JSON-RPC 2.0** message frames.\n\n### Handshake and Initialization Sequence\nWhen an MCP Host launches an MCP Server, a strict handshake occurs:\n\n```text\n      MCP HOST (Client)                                MCP SERVER\n             \u2502                                              \u2502\n             \u2502 \u2500\u2500\u2500 1. initialize request (JSON-RPC) \u2500\u2500\u2500\u2500\u2500\u2500\u25ba \u2502\n             \u2502     {protocolVersion, capabilities}          \u2502\n             \u2502                                              \u2502\n             \u2502 \u25c4\u2500\u2500 2. initialize response (JSON-RPC) \u2500\u2500\u2500\u2500\u2500\u2500 \u2502\n             \u2502     {protocolVersion, serverInfo, cap}       \u2502\n             \u2502                                              \u2502\n             \u2502 \u2500\u2500\u2500 3. notifications/initialized \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u25ba \u2502\n             \u2502                                              \u2502\n             \u2502 \u2500\u2500\u2500 4. tools/list request \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u25ba \u2502\n             \u2502 \u25c4\u2500\u2500 5. tools/list response (JSON schemas) \u2500\u2500 \u2502\n             \u2502                                              \u2502\n```\n\n### Transport Options: Stdio vs. SSE / HTTP\nMCP supports two core transport layers depending on deployment topology:\n\n1. **Standard I/O (Stdio) Transport**:\n   - The MCP Host spawns the MCP Server as a local child process (`python server.py` or `node server.js`).\n   - Communication happens via standard input (`stdin`) and standard output (`stdout`).\n   - **Pros**: Zero network overhead, maximum security (no open network ports), instant process lifecycle management.\n   - **Best For**: Local developer tools, IDE extensions, desktop AI clients.\n\n2. **Server-Sent Events (SSE) / HTTP Transport**:\n   - The MCP Server runs as a remote web service.\n   - Client sends JSON-RPC requests via HTTP POST; server streams responses and updates back via SSE.\n   - **Pros**: Allows central cloud deployments, shared multi-tenant tool servers, cross-network accessibility.\n   - **Best For**: Enterprise tool servers, microservice architectures.\n\n```json\n// Sample JSON-RPC 2.0 Frame: Host invoking a tool on MCP Server\n{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 42,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"add_expense\",\n    \"arguments\": {\n      \"amount\": 49.99,\n      \"category\": \"Software\",\n      \"description\": \"Domain renewal\"\n    }\n  }\n}\n```\n\n---\n\n## 4. Hands-On Practice: Building Tool Servers with FastMCP\n\nDuring my practice lab, I used **FastMCP** \u2014 a high-level Python framework created to simplify MCP server construction using simple Python type hints and decorators (similar to FastAPI).\n\nI implemented two production-pattern servers:\n1. **SQLite Expense Tracker Server**: Exposing tools to create tables, insert financial transactions, filter expense reports by date, and return budget balance summaries.\n2. **Local Email/Markdown Assistant**: Exposing tools to parse markdown documentation, search local directory trees, and draft email updates.\n\n```python\n# Minimal FastMCP Server Example\nfrom fastmcp import FastMCP\nimport sqlite3\n\n# Initialize MCP Server\nmcp = FastMCP(\"SQLite Expense Assistant\")\n\n@mcp.tool()\ndef add_expense(amount: float, category: str, description: str) -> str:\n    '''Add a new expense transaction to the local SQLite database.'''\n    conn = sqlite3.connect(\"expenses.db\")\n    cursor = conn.cursor()\n    cursor.execute(\n        \"INSERT INTO expenses (amount, category, description) VALUES (?, ?, ?)\",\n        (amount, category, description)\n    )\n    conn.commit()\n    conn.close()\n    return f\"Successfully recorded ${amount:.2f} for '{category}'.\"\n\nif __name__ == \"__main__\":\n    mcp.run(transport=\"stdio\")\n```\n\n---\n\n## 5. Security, Sandboxing, and Multi-Tenant Isolation\n\nGiving LLMs the ability to execute tools on your local machine or internal network introduces significant security considerations. During my exploration, I analyzed the core security boundaries enforced by MCP:\n\n1. **User Confirmation Gates**: Host applications (like Claude Desktop) prompt users for explicit approval before executing any tool with potential side effects.\n2. **Schema Validation**: MCP clients strictly validate argument types against JSON schemas *before* transmitting JSON-RPC calls to the server, neutralizing basic injection attempts.\n3. **Stdio Process Isolation**: Local Stdio servers inherit only the permissions of the parent host process, preventing unauthorized privilege escalation.\n4. **Read-Only Resource Boundaries**: Keeping data streams defined as **Resources** guarantees that inspecting context cannot inadvertently alter system state.\n\n---\n\n## Summary & Key Takeaways\n\n1. **LSP for AI**: MCP acts as the universal standard for AI tools, completely decoupling host UI clients from tool integrations.\n2. **Clean Abstractions**: Tools handle actions, Resources handle read-only data context, Prompts handle reusable shortcuts.\n3. **Transports for Every Use Case**: Use Stdio for local low-latency process integration; use SSE/HTTP for remote microservice tools.\n4. **FastMCP Simplifies Creation**: Python type hints and decorators make turning standard backend logic into AI-accessible tool servers effortless.\n",
+                content_type="LEARN",
+                category="AI / ML",
+                reading_time="17 min read",
+                status="PUBLISHED",
+                featured=True,
+                published_at="2026-08-10",
+                cover_image="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop",
+                author="Shlok Bam",
+                project_slug=null,
+                github_repo="shlokbam/MCP--Model-Context-Protocol-",
+                tags=tags_9
+            )
+            db.add(post_9)
+            db.commit()
+
+        # Seed architecting-agentic-ai-workflows-masterclass-langgraph-state-graphs-dags-iterative-feedback
+        existing_10 = db.query(Post).filter(Post.slug == "architecting-agentic-ai-workflows-masterclass-langgraph-state-graphs-dags-iterative-feedback").first()
+        if not existing_10:
+        tags_10 = []
+        t_agentic_ai = db.query(Tag).filter(Tag.name == "Agentic AI").first()
+        if not t_agentic_ai:
+            t_agentic_ai = Tag(name="Agentic AI", slug="agentic-ai")
+            db.add(t_agentic_ai)
+            db.commit()
+        tags_10.append(t_agentic_ai)
+        t_langgraph = db.query(Tag).filter(Tag.name == "LangGraph").first()
+        if not t_langgraph:
+            t_langgraph = Tag(name="LangGraph", slug="langgraph")
+            db.add(t_langgraph)
+            db.commit()
+        tags_10.append(t_langgraph)
+        t_ai = db.query(Tag).filter(Tag.name == "AI").first()
+        if not t_ai:
+            t_ai = Tag(name="AI", slug="ai")
+            db.add(t_ai)
+            db.commit()
+        tags_10.append(t_ai)
+        t_python = db.query(Tag).filter(Tag.name == "Python").first()
+        if not t_python:
+            t_python = Tag(name="Python", slug="python")
+            db.add(t_python)
+            db.commit()
+        tags_10.append(t_python)
+        t_state_graphs = db.query(Tag).filter(Tag.name == "State Graphs").first()
+        if not t_state_graphs:
+            t_state_graphs = Tag(name="State Graphs", slug="state-graphs")
+            db.add(t_state_graphs)
+            db.commit()
+        tags_10.append(t_state_graphs)
+
+            post_10 = Post(
+                title="Architecting Agentic AI Workflows: A Masterclass on LangGraph State Graphs, Directed Acyclic Graphs, and Iterative Loop Feedback",
+                slug="architecting-agentic-ai-workflows-masterclass-langgraph-state-graphs-dags-iterative-feedback",
+                excerpt="A deep analytical guide to stateful AI agent architectures \u2014 exploring LangGraph deterministic execution, parallel branching, conditional routers, and persistent checkpoint state engines.",
+                content="![Agentic AI LangGraph Hero](agentic-hero)\n\n# Introduction \u2014 Why Linear LLM Chains Fail for Complex Reasoning\n\nWhen generative AI first entered software mainstream, developers built applications using simple linear chains: `User Input -> Prompt Template -> LLM Call -> Output`. \n\nFor basic Q&A, sentiment analysis, or simple text generation, linear chains were sufficient. However, as developers attempted to build complex AI assistants \u2014 such as automated code refactorers, multi-step financial auditors, or autonomous research assistants \u2014 linear chains collapsed.\n\nLinear chains lack three essential engineering capabilities:\n1. **Cycles and Loops**: The ability to iterate, evaluate work, and attempt fixes when an initial attempt fails.\n2. **State Persistence**: A reliable mechanism to pass structured state across multiple reasoning steps without context window pollution.\n3. **Deterministic Routing**: The ability to combine rule-based code routing with probabilistic LLM classification decisions.\n\nTo master stateful, multi-agent engineering, I completed an extensive hands-on practice lab focused on **Agentic AI Architecture** using **LangGraph** \u2014 LangChain's framework for building stateful, multi-actor applications with LLMs as Directed Acyclic Graphs (DAGs) and cyclic state machines.\n\n---\n\n## 1. The Foundations of Stateful Agent Graphs\n\nIn LangGraph, an agentic application is modeled as a **State Graph**.\n\n```text\n                    THE EVALUATOR-OPTIMIZER AGENTIC LOOP\n                    \n                    \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n                    \u2502          START NODE          \u2502\n                    \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                                   \u2502\n                                   \u25bc\n                    \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n                    \u2502        GENERATOR NODE        \u2502 \u25c4\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n                    \u2502   (Drafts Code / Response)   \u2502                  \u2502\n                    \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518                  \u2502\n                                   \u2502                                  \u2502\n                                   \u25bc                                  \u2502\n                    \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510                  \u2502\n                    \u2502        EVALUATOR NODE        \u2502                  \u2502\n                    \u2502   (Audits & Scores Output)   \u2502                  \u2502\n                    \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518                  \u2502\n                                   \u2502                                  \u2502 Revision\n                                   \u25bc                                  \u2502 Feedback\n                       Conditional Router Edge                        \u2502\n                      /                        \\                      \u2502\n         Score >= 80 /                          \\ Score < 80          \u2502\n                    /                            \\                    \u2502\n                   \u25bc                              \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n    \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n    \u2502           END NODE           \u2502\n    \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n```\n\nThe core architecture rests on three pillars:\n\n- **State Object (`TypedDict` or Pydantic)**: The central state dictionary shared by all nodes in the graph. Every node receives the current state object, performs its logic, and returns state key updates.\n- **Nodes**: Standard Python functions or LLM invocations that execute work.\n- **Edges**: Control-flow paths that connect nodes. Static edges connect Node A to Node B unconditionally; **Conditional Edges** inspect state variables and dynamically route execution to different downstream nodes based on router functions.\n\n---\n\n## 2. Deep-Dive into LangGraph Core Abstractions\n\n### State Schemas & State Reducers\nOne of the most powerful concepts in LangGraph is **State Reducers**. \n\nBy default, when a node returns a dictionary key update (e.g., `{\"messages\": [new_message]}`), LangGraph overwrites the existing value of `messages`. However, by annotating keys with reducer functions like `operator.add`, LangGraph appends new elements to lists rather than overwriting them.\n\n```python\nfrom typing import TypedDict, Annotated\nimport operator\n\n# State dictionary with additive message reducer\nclass AgentState(TypedDict):\n    messages: Annotated[list, operator.add]\n    code_draft: str\n    feedback: str\n    iteration_count: int\n    quality_score: float\n```\n\n### Nodes as Pure Functional Mutators\nA node in LangGraph is simply a Python function that takes `AgentState` as its argument and returns a dictionary of key-value pairs to update:\n\n```python\ndef evaluator_node(state: AgentState) -> dict:\n    '''Evaluates the code draft and assigns a score.'''\n    code = state[\"code_draft\"]\n    # LLM or linter inspection logic here...\n    score = 85.0\n    return {\"quality_score\": score, \"feedback\": \"Code is clean with good comments.\"}\n```\n\n### Conditional Routers\nConditional edges use simple Python logic to inspect state and direct execution flow:\n\n```python\ndef route_next_step(state: AgentState) -> str:\n    '''Routes execution based on quality score and safety iteration limits.'''\n    if state[\"quality_score\"] >= 80.0 or state[\"iteration_count\"] >= 3:\n        return \"accept_output\"\n    return \"revise_draft\"\n```\n\n---\n\n## 3. Architectural Design Patterns Mastered in Practice\n\nDuring my lab work, I built and benchmarked three foundational agentic design patterns:\n\n### Pattern A: The Supervisor / Router Pattern\nA central classification node receives the user query, categorizes intent (e.g., Technical Support vs. Billing Query vs. Feature Request), and routes execution to specialized downstream worker sub-agents.\n\n### Pattern B: The Map-Reduce / Parallel Fan-Out Pattern\nAn orchestrator node breaks a large task into an array of sub-tasks, fans out parallel execution across worker nodes simultaneously, and aggregates individual outputs into a single final synthesis node (e.g., parallel paper research across bioRxiv, arXiv, and Google Scholar).\n\n### Pattern C: The Evaluator-Optimizer Feedback Loop\nA generator node produces an initial draft; an evaluator node tests or inspects the draft against strict rubric criteria. If errors are found, constructive feedback is injected into state, and conditional edges loop execution back to the generator for revision until passing thresholds are met.\n\n---\n\n## 4. State Persistence, Checkpoints, and Human-in-the-Loop (HITL)\n\n### Thread Checkpointing & Time Travel\nIn production AI applications, conversations last over extended time horizons, and systems crash. LangGraph solves this by integrating **Checkpointers** (`MemorySaver`, `SqliteSaver`, or `PostgresSaver`).\n\nAfter *every single node execution*, the checkpointer writes a snapshot of the current `AgentState` to a database thread ID (`thread_id=\"session_123\"`).\n\nThis architecture enables **Time Travel**:\n- Users can pause execution mid-graph.\n- Developers can rewind state back to step 3, modify a prompt key, and fork execution along a new path.\n- State resumes seamlessly even after complete server restarts.\n\n### Human-in-the-Loop (HITL) Approval Gates\nFor sensitive agent actions (e.g., executing SQL updates, sending external emails, or running code shell commands), human oversight is mandatory.\n\nLangGraph provides native support for HITL via `interrupt_before=[\"tool_execution_node\"]`. When the graph hits an interrupted node, execution pauses, saves state to the checkpointer, and returns control to the API caller. Once a human approves or modifies state, execution resumes with zero data loss.\n\n---\n\n## 5. Debugging & Production Pitfalls\n\n1. **Infinite Loop Traps**: In cyclic evaluator-optimizer loops, an LLM might fail to achieve the required quality score, locking the graph in an infinite execution loop.\n   - **Solution**: Always enforce strict state counters (`iteration_count`) and configure `recursion_limit` guards when compiling graphs (`app = workflow.compile(checkpointer=memory)`).\n2. **State Overwrite Bugs**: Forgetting to use reducer functions (`Annotated[list, operator.add]`) causes nodes to wipe existing conversation history instead of appending to it.\n\n---\n\n## Summary & Key Takeaways\n\n1. **Embrace Cycles**: True problem solving requires feedback loops, evaluation steps, and iterative self-correction.\n2. **State is Central**: Design structured, immutable state schemas using `TypedDict` and explicit reducer functions.\n3. **Control Flow via Routers**: Combine deterministic Python conditional logic with probabilistic LLM routing functions.\n4. **Persistence Enables Safety**: Use thread checkpointers to support state persistence, time travel debugging, and Human-in-the-Loop approval gates.\n",
+                content_type="LEARN",
+                category="AI / ML",
+                reading_time="20 min read",
+                status="PUBLISHED",
+                featured=True,
+                published_at="2026-08-20",
+                cover_image="https://images.unsplash.com/photo-1677442136019-21780efad99a?q=80&w=1000&auto=format&fit=crop",
+                author="Shlok Bam",
+                project_slug=null,
+                github_repo="shlokbam/Agnetic_AI",
+                tags=tags_10
+            )
+            db.add(post_10)
+            db.commit()
+
+        # Seed demystifying-llm-observability-benchmarking-tracing-evaluation-datasets-langsmith
+        existing_11 = db.query(Post).filter(Post.slug == "demystifying-llm-observability-benchmarking-tracing-evaluation-datasets-langsmith").first()
+        if not existing_11:
+        tags_11 = []
+        t_langsmith = db.query(Tag).filter(Tag.name == "LangSmith").first()
+        if not t_langsmith:
+            t_langsmith = Tag(name="LangSmith", slug="langsmith")
+            db.add(t_langsmith)
+            db.commit()
+        tags_11.append(t_langsmith)
+        t_llm_observability = db.query(Tag).filter(Tag.name == "LLM Observability").first()
+        if not t_llm_observability:
+            t_llm_observability = Tag(name="LLM Observability", slug="llm-observability")
+            db.add(t_llm_observability)
+            db.commit()
+        tags_11.append(t_llm_observability)
+        t_tracing = db.query(Tag).filter(Tag.name == "Tracing").first()
+        if not t_tracing:
+            t_tracing = Tag(name="Tracing", slug="tracing")
+            db.add(t_tracing)
+            db.commit()
+        tags_11.append(t_tracing)
+        t_ai = db.query(Tag).filter(Tag.name == "AI").first()
+        if not t_ai:
+            t_ai = Tag(name="AI", slug="ai")
+            db.add(t_ai)
+            db.commit()
+        tags_11.append(t_ai)
+        t_python = db.query(Tag).filter(Tag.name == "Python").first()
+        if not t_python:
+            t_python = Tag(name="Python", slug="python")
+            db.add(t_python)
+            db.commit()
+        tags_11.append(t_python)
+
+            post_11 = Post(
+                title="Demystifying LLM Observability & Benchmarking: Tracing, Evaluation Datasets, and Latency Analysis with LangSmith",
+                slug="demystifying-llm-observability-benchmarking-tracing-evaluation-datasets-langsmith",
+                excerpt="An in-depth guide to opening the black box of LLM applications \u2014 implementing tracing telemetry, token cost auditing, automated evaluation datasets, and chain performance profiling.",
+                content="![LangSmith LLM Observability Hero](langsmith-hero)\n\n# Introduction \u2014 The Blindness of Non-Deterministic AI Engineering\n\nIn traditional software development, debugging is straightforward: stack traces pinpoint exact line failures, APM tools (like Datadog or New Relic) track API latency histograms, and deterministic unit tests verify input-output contracts.\n\nIn Generative AI engineering, traditional observability breaks down completely.\n\nWhen your application depends on Large Language Models, failures are probabilistic, subtle, and silent:\n- An LLM prompt succeeds with HTTP status 200, but returns hallucinated facts.\n- A multi-step RAG chain suddenly spikes in latency because an upstream document loader included 50KB of un-chunked DOM noise.\n- An agent tool call selects the wrong database parameter because a subtle prompt tweak altered its reasoning path.\n\nWithout specialized telemetry, building production LLM applications is like flying blind.\n\nTo solve this, I spent extensive time practicing **LLM Observability and Benchmarking** with **LangSmith** \u2014 Anthropic and LangChain's enterprise platform for tracing, testing, evaluating, and monitoring AI pipelines. Here is my comprehensive breakdown.\n\n---\n\n## 1. What is LangSmith? The Complete LLM Lifecycle Platform\n\nLangSmith provides end-to-end visibility across the entire lifecycle of an AI application:\n\n```text\n                        LANGSMITH OBSERVABILITY ECOSYSTEM\n                        \n  \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n  \u2502                            DEVELOPMENT PHASE                              \u2502\n  \u2502  \u2022 Prompt Playground (Iterate templates side-by-side)                     \u2502\n  \u2502  \u2022 Execution Tracing (Inspect exact prompt inputs & raw model tokens)     \u2502\n  \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                                        \u2502\n                                        \u25bc\n  \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n  \u2502                             TESTING & EVAL                                \u2502\n  \u2502  \u2022 Ground-Truth Datasets (Create test suites from real usage)             \u2502\n  \u2502  \u2022 Automated Evaluators (LLM-as-a-Judge for Correctness & Groundedness)   \u2502\n  \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                                        \u2502\n                                        \u25bc\n  \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n  \u2502                             PRODUCTION PHASE                              \u2502\n  \u2502  \u2022 Cost & Token Auditing (Track spending per user/tenant)                 \u2502\n  \u2502  \u2022 Feedback Capture (Link user thumbs-up/down to exact execution traces)  \u2502\n  \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n```\n\n---\n\n## 2. Mechanics of Telemetry & Execution Tracing\n\n### Zero-Code Tracing Activation\nLangSmith hooks directly into standard LLM SDKs (LangChain, OpenAI, Anthropic, Instructor) via standard environment variables. You don't need to bloat your application logic with manual logging statements:\n\n```bash\n# Enable automatic background tracing telemetry\nexport LANGCHAIN_TRACING_V2=\"true\"\nexport LANGCHAIN_API_KEY=\"ls__sp_your_api_key_here\"\nexport LANGCHAIN_PROJECT=\"devops-journal-production\"\n```\n\n### Understanding Span Trees & Call Hierarchies\nWhen an execution trace is captured, LangSmith visualizes it as a nested **Span Tree**. A single user query generates a tree of execution runs:\n\n```text\n \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n \u2502 Trace: RunnableSequence [Total Time: 1.42s | Cost: $0.0034]                \u2502\n \u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524\n \u2502                                                                           \u2502\n \u2502  \u251c\u2500\u2500 1. ChatPromptTemplate (Format system & human prompt)       [0.01s]   \u2502\n \u2502                                                                           \u2502\n \u2502  \u251c\u2500\u2500 2. VectorStoreRetriever (ChromaDB Vector Search)           [0.18s]   \u2502\n \u2502  \u2502    \u2514\u2500\u2500 Top 3 Chunks Retrieved: [doc_id_81, doc_id_14]                 \u2502\n \u2502                                                                           \u2502\n \u2502  \u2514\u2500\u2500 3. ChatAnthropic (claude-3-5-sonnet-20241022)             [1.23s]   \u2502\n \u2502       \u251c\u2500\u2500 Prompt Tokens: 1,420                                             \u2502\n \u2502       \u251c\u2500\u2500 Completion Tokens: 185                                          \u2502\n \u2502       \u2514\u2500\u2500 Output: \"Based on the infrastructure logs...\"                   \u2502\n \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n```\n\nThis granular hierarchy allows developers to isolate bottlenecks immediately: if a request takes 5 seconds, you can visually confirm whether 4.8 seconds were spent waiting on LLM token generation or inside a slow vector database query.\n\n---\n\n## 3. Building Rigorous Evaluation Benchmarks\n\nThe most critical realization when learning LangSmith is that **evaluating LLM applications requires structured benchmark datasets**, not ad-hoc manual testing.\n\n### Creating Ground-Truth Datasets\nLangSmith allows developers to construct evaluation datasets consisting of input key-value pairs and target ground-truth answers. Datasets can be imported from CSV files, constructed programmatically via Python SDK, or dynamically saved from production execution traces.\n\n### LLM-as-a-Judge Evaluators\nHow do you automatically score freeform text answers? By using specialized evaluator models configured with strict rubric criteria.\n\nLangSmith provides pre-built evaluators and allows custom evaluators:\n\n1. **Correctness Evaluator**: Compares the generated answer against the target ground truth to verify factual accuracy.\n2. **Faithfulness / Groundedness Evaluator**: Inspects the retrieved context chunks in a RAG pipeline and flags whether the LLM introduced claims not present in the source documents (hallucinations).\n3. **Conciseness & Style Evaluators**: Checks whether the output adheres to tone, format (JSON), and length constraints.\n\n```python\n# Custom LLM-as-a-Judge Evaluator Definition in LangSmith\nfrom langsmith.evaluation import StringEvaluator, evaluate\n\ndef correctness_evaluator(run, example):\n    '''Evaluates if predicted output matches ground truth intent.'''\n    prediction = run.outputs.get(\"output\", \"\")\n    ground_truth = example.outputs.get(\"answer\", \"\")\n    \n    # Simple heuristic or evaluator model call...\n    is_correct = ground_truth.lower() in prediction.lower()\n    return {\"key\": \"correctness\", \"score\": 1.0 if is_correct else 0.0}\n\n# Run systematic benchmark suite across 100 dataset examples\n# results = evaluate(\n#     target_pipeline_function,\n#     data=\"rag-benchmark-dataset\",\n#     evaluators=[correctness_evaluator],\n#     experiment_prefix=\"gpt4o-vs-claude35\"\n# )\n```\n\n---\n\n## 4. Hands-On Debugging & Cost Optimization Workflows\n\nDuring my evaluation lab, I practiced resolving three classic production failure modes:\n\n### Scenario 1: Unintentional Prompt Inflation (Cost Leaks)\n- **Problem**: API costs spiked by 400% after adding web search tools to an agent.\n- **Diagnosis via LangSmith**: Inspecting trace spans revealed that the web search tool was injecting 15,000 tokens of raw, un-sanitized HTML DOM noise into the prompt context on every loop iteration.\n- **Fix**: Adding a DOM sanitizer node before passing text to the LLM, reducing token volume per request by 85%.\n\n### Scenario 2: Agent Tool Selection Regressions\n- **Problem**: Updating the base system prompt caused the agent to stop invoking the database query tool.\n- **Diagnosis via LangSmith**: Running a side-by-side **Experiment Compare** view in LangSmith between Prompt V1 and Prompt V2 highlighted that V2 omitted parameter type definitions, causing the LLM to default to plain text responses.\n\n---\n\n## Summary & Key Takeaways\n\n1. **Trace Everything**: Enable background tracing (`LANGCHAIN_TRACING_V2=true`) across all dev and production environments.\n2. **Rely on Datasets, Not Vibes**: Build ground-truth benchmark datasets to test changes objectively before deploying code updates.\n3. **Monitor Token Economics**: Use span tree metrics to catch token context inflation early.\n4. **Close the Feedback Loop**: Attach user feedback scores directly to trace IDs to isolate failing queries instantly.\n",
+                content_type="LEARN",
+                category="AI / ML",
+                reading_time="16 min read",
+                status="PUBLISHED",
+                featured=True,
+                published_at="2026-09-01",
+                cover_image="https://images.unsplash.com/photo-1551288049-bebda4e38f71?q=80&w=1000&auto=format&fit=crop",
+                author="Shlok Bam",
+                project_slug=null,
+                github_repo="shlokbam/LangSmith",
+                tags=tags_11
+            )
+            db.add(post_11)
+            db.commit()
+
+        # Seed from-ingestion-to-lcel-comprehensive-guide-langchain-expression-language-rag-vector-databases
+        existing_12 = db.query(Post).filter(Post.slug == "from-ingestion-to-lcel-comprehensive-guide-langchain-expression-language-rag-vector-databases").first()
+        if not existing_12:
+        tags_12 = []
+        t_generative_ai = db.query(Tag).filter(Tag.name == "Generative AI").first()
+        if not t_generative_ai:
+            t_generative_ai = Tag(name="Generative AI", slug="generative-ai")
+            db.add(t_generative_ai)
+            db.commit()
+        tags_12.append(t_generative_ai)
+        t_langchain = db.query(Tag).filter(Tag.name == "LangChain").first()
+        if not t_langchain:
+            t_langchain = Tag(name="LangChain", slug="langchain")
+            db.add(t_langchain)
+            db.commit()
+        tags_12.append(t_langchain)
+        t_lcel = db.query(Tag).filter(Tag.name == "LCEL").first()
+        if not t_lcel:
+            t_lcel = Tag(name="LCEL", slug="lcel")
+            db.add(t_lcel)
+            db.commit()
+        tags_12.append(t_lcel)
+        t_rag = db.query(Tag).filter(Tag.name == "RAG").first()
+        if not t_rag:
+            t_rag = Tag(name="RAG", slug="rag")
+            db.add(t_rag)
+            db.commit()
+        tags_12.append(t_rag)
+        t_chromadb = db.query(Tag).filter(Tag.name == "ChromaDB").first()
+        if not t_chromadb:
+            t_chromadb = Tag(name="ChromaDB", slug="chromadb")
+            db.add(t_chromadb)
+            db.commit()
+        tags_12.append(t_chromadb)
+
+            post_12 = Post(
+                title="From Ingestion to LCEL: A Comprehensive Practice Guide to LangChain Expression Language, RAG Pipelines, and Vector Databases",
+                slug="from-ingestion-to-lcel-comprehensive-guide-langchain-expression-language-rag-vector-databases",
+                excerpt="A foundational deep dive into modern Generative AI engineering \u2014 mastering document loaders, chunking strategies, vector embeddings, ChromaDB indexing, and LCEL pipeline composition.",
+                content="![Generative AI LCEL Hero](genai-hero)\n\n# Introduction \u2014 Demystifying the Generative AI Stack\n\nGenerative AI has shifted software development from writing explicit step-by-step algorithms to orchestrating probabilistic foundation models. \n\nHowever, building enterprise-ready Generative AI systems requires far more than wrapping a basic API call to an LLM. Production AI applications demand structured document ingestion pipelines, semantic vector search, prompt engineering, and composable execution chains capable of streaming responses in real time.\n\nTo gain complete mastery over these fundamentals, I built an end-to-end practical learning lab covering the entire Generative AI architecture stack: **Document Loaders**, **Semantic Text Splitting**, **Vector Embeddings**, **ChromaDB Vector Storage**, and **LangChain Expression Language (LCEL)**.\n\nHere is my comprehensive technical breakdown of how these pieces fit together.\n\n---\n\n## 1. The End-to-End RAG Ingestion & Retrieval Pipeline\n\n**Retrieval-Augmented Generation (RAG)** is the industry-standard architecture for grounding LLMs on custom, private data without the massive cost of fine-tuning base models.\n\n```text\n                        THE END-TO-END RAG PIPELINE\n                        \n \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n \u2502                            INGESTION PHASE (Offline)                        \u2502\n \u2502                                                                             \u2502\n \u2502  \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510    \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510    \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510    \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510  \u2502\n \u2502  \u2502 Unstructured\u2502 \u2500\u2500\u25ba\u2502 Document    \u2502 \u2500\u2500\u25ba\u2502 Text        \u2502 \u2500\u2500\u25ba\u2502 Dense Vector\u2502  \u2502\n \u2502  \u2502 Docs (PDF/  \u2502    \u2502 Loader      \u2502    \u2502 Splitter    \u2502    \u2502 Embedding   \u2502  \u2502\n \u2502  \u2502 HTML/TXT)   \u2502    \u2502 (PyPDF/Web) \u2502    \u2502 (Recursive) \u2502    \u2502 Model       \u2502  \u2502\n \u2502  \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518    \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518    \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518    \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2518  \u2502\n \u2502                                                                  \u2502         \u2502\n \u2502                                                                  \u25bc         \u2502\n \u2502                                                           \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510  \u2502\n \u2502                                                           \u2502 ChromaDB    \u2502  \u2502\n \u2502                                                           \u2502 Vector Store\u2502  \u2502\n \u2502                                                           \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2518  \u2502\n \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                                                                    \u2502\n \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n \u2502                            RETRIEVAL PHASE (Runtime)             \u2502          \u2502\n \u2502                                                                  \u25bc          \u2502\n \u2502  \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510    \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510                       \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510  \u2502\n \u2502  \u2502 User Prompt \u2502 \u2500\u2500\u25ba\u2502 Similarity  \u2502 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u25ba\u2502 Top-K Chunks\u2502  \u2502\n \u2502  \u2502 Question    \u2502    \u2502 Query       \u2502                       \u2502 Context     \u2502  \u2502\n \u2502  \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518    \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518                       \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2518  \u2502\n \u2502                                                                  \u2502          \u2502\n \u2502                                                                  \u25bc          \u2502\n \u2502                                                           \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510  \u2502\n \u2502                                                           \u2502 Augmented   \u2502  \u2502\n \u2502                                                           \u2502 Prompt + LLM\u2502  \u2502\n \u2502                                                           \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518  \u2502\n \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n```\n\n---\n\n## 2. Ingestion Deep Dive: Loaders, Chunking, and Embeddings\n\n### Step 1: Document Loading\nDocument loaders abstract the complexity of ingesting diverse file formats (PDFs, Markdown, HTML, CSVs) into unified `Document` objects containing raw text string content and metadata dictionaries (source file, page numbers, creation dates).\n\n### Step 2: Semantic Text Splitting & Chunking Strategies\nPassing an entire 100-page PDF to an LLM is inefficient, expensive, and dilutes retrieval quality. Documents must be broken into smaller, semantically coherent text chunks.\n\nComparing chunking strategies practiced in the lab:\n\n- **CharacterTextSplitter**: Splits blindly on single characters (e.g., `\n\n`). Fast, but frequently cuts sentences in half, ruining semantic context.\n- **RecursiveCharacterTextSplitter (Recommended)**: Attempts to split by a prioritized list of separators (`[\"\n\n\", \"\n\", \" \", \"\"]`). It keeps paragraphs, sentences, and words intact wherever possible.\n- **Chunk Size & Overlap Trade-offs**:\n  - Small Chunks (250 tokens): High retrieval precision, but lacks surrounding context.\n  - Large Chunks (1,500 tokens): Rich context, but risks embedding noise and higher token costs.\n  - Chunk Overlap (e.g., 50\u2013100 tokens): Essential to preserve sentence semantics across chunk boundaries.\n\n### Step 3: Dense Vector Embeddings & Vector Stores\nAn **Embedding Model** (such as OpenAI `text-embedding-3-small` or HuggingFace `all-MiniLM-L6-v2`) maps text chunks into high-dimensional numerical vector spaces (e.g., 1,536 dimensions).\n\nWhen stored inside a **Vector Database** (like ChromaDB or FAISS), semantic similarity between queries and document chunks is calculated in milliseconds using vector distance metrics:\n\n- **Cosine Similarity**: Measures the angle between vectors (ideal for text normalized by length).\n- **Euclidean Distance**: Measures straight-line distance between vector endpoints.\n- **Dot Product**: Measures both vector magnitude and directional alignment.\n\n---\n\n## 3. LangChain Expression Language (LCEL) Internals\n\nIn early versions of LangChain, chains were constructed using rigid, opaque classes like `LLMChain` or `RetrievalQA`. \n\n**LangChain Expression Language (LCEL)** replaced legacy constructs with a unified, declarative composition syntax built on the **Unix Pipe Operator (`|`)**.\n\n### The Unified `Runnable` Interface\nEvery LCEL component implements the standard `Runnable` protocol, guaranteeing consistent methods across all objects:\n- `invoke()`: Synchronous single-input execution.\n- `batch()`: Parallel execution across an array of inputs.\n- `stream()`: Real-time token-by-token response streaming.\n\n### Core LCEL Primitives\n\n1. **`RunnableSequence` (`A | B | C`)**: Pipes the output of component A as the direct input to component B.\n2. **`RunnableParallel`**: Executes multiple retrieval or prompt formatting steps concurrently in parallel threads, combining outputs into a dictionary.\n3. **`RunnablePassthrough`**: Passes user input through to downstream components without alteration.\n4. **`RunnableLambda`**: Wraps custom Python functions directly into LCEL chains.\n\n```python\n# Declarative LCEL Pipeline Construction Example\nfrom langchain_core.prompts import ChatPromptTemplate\nfrom langchain_core.runnables import RunnableParallel, RunnablePassthrough\nfrom langchain_core.output_parsers import StrOutputParser\n\n# 1. Define Prompt Template\nprompt = ChatPromptTemplate.from_template('''\nAnswer the question based ONLY on the provided context:\nContext: {context}\nQuestion: {question}\n''')\n\n# 2. Construct LCEL Chain using Pipe (|) Operator\n# retriever = vectorstore.as_retriever(search_kwargs={\"k\": 3})\n\n# chain = (\n#     RunnableParallel({\n#         \"context\": retriever,\n#         \"question\": RunnablePassthrough()\n#     })\n#     | prompt\n#     | llm\n#     | StrOutputParser()\n# )\n\n# Executing the chain with streaming output support\n# for chunk in chain.stream(\"What are the key Terraform best practices?\"):\n#     print(chunk, end=\"\", flush=True)\n```\n\n---\n\n## 4. Advanced RAG Patterns & Production Lessons\n\n1. **Multi-Query Expansion**: User queries are often ambiguous. Using an LLM to generate 3 semantic variations of a user's question before querying ChromaDB increases document retrieval recall by over 30%.\n2. **Contextual Compression & Reranking**: Vector search returns top-K raw chunks; a secondary **Reranker** model re-scores chunks to eliminate irrelevance before passing context to the main LLM context window.\n3. **Model Fallback Resilience**: Using `.with_fallbacks([backup_llm])` on LCEL chains ensures that if an primary API provider experiences an outage or rate limit (HTTP 429), the chain seamlessly fails over to a secondary model without crashing.\n\n---\n\n## Summary & Key Takeaways\n\n1. **Use Recursive Chunking**: Prefer `RecursiveCharacterTextSplitter` with moderate overlap (10\u201315%) to maintain sentence integrity.\n2. **LCEL is Standard**: Compose AI pipelines declaratively using the `|` pipe operator for built-in streaming, batching, and async support.\n3. **RAG Needs Optimization**: Expand queries and use rerankers to improve retrieval accuracy.\n4. **Design for Resilience**: Add `.with_fallbacks()` to production LCEL chains for high availability.\n",
+                content_type="LEARN",
+                category="AI / ML",
+                reading_time="21 min read",
+                status="PUBLISHED",
+                featured=True,
+                published_at="2026-09-15",
+                cover_image="https://images.unsplash.com/photo-1620712943543-bcc4688e7485?q=80&w=1000&auto=format&fit=crop",
+                author="Shlok Bam",
+                project_slug=null,
+                github_repo="shlokbam/Generative_AI",
+                tags=tags_12
+            )
+            db.add(post_12)
+            db.commit()
     finally:
         db.close()
 
