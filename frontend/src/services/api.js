@@ -3,13 +3,39 @@ import { JOURNAL_POSTS, EXPERIMENTS_DATA, PROFILE_DATA } from './journalData';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://journal-backend-ypg5.onrender.com/api';
 
+const coldStartListeners = new Set();
+
+export function onColdStartChange(callback) {
+  coldStartListeners.add(callback);
+  return () => coldStartListeners.delete(callback);
+}
+
+function notifyColdStart(state) {
+  coldStartListeners.forEach((fn) => fn(state));
+}
+
 async function fetchWithFallback(url, fallbackData) {
+  let isTimerFired = false;
+
+  // If request takes longer than 2.0s, trigger cold-start banner
+  const timer = setTimeout(() => {
+    isTimerFired = true;
+    notifyColdStart({ isColdStarting: true, isReady: false });
+  }, 2000);
+
   try {
     const res = await fetch(`${API_BASE_URL}${url}`);
+    clearTimeout(timer);
+    
     if (!res.ok) throw new Error(`HTTP error ${res.status}`);
     const data = await res.json();
+    
+    if (isTimerFired) {
+      notifyColdStart({ isColdStarting: true, isReady: true });
+    }
     return data;
   } catch (err) {
+    clearTimeout(timer);
     // Graceful fallback to primary article store when backend is starting or offline
     return fallbackData;
   }

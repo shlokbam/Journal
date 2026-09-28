@@ -13,6 +13,8 @@ import { postsApi } from '../services/api';
 import { Badge } from '../components/ui/Badge';
 import { TableOfContents } from '../components/articles/TableOfContents';
 import { ArticleImageEmbed } from '../components/articles/ArticleVisualEmbeds';
+import { NeuralSkeletonLoader } from '../components/ui/NeuralSkeletonLoader';
+import { ColdStartBanner } from '../components/ui/ColdStartBanner';
 
 // Custom Code Block component with Copy-to-Clipboard functionality
 function CodeBlock({ children, className }) {
@@ -123,8 +125,9 @@ export function ArticleDetail() {
 
   if (loading) {
     return (
-      <div className="py-24 text-center font-mono text-sm text-[#6B7280]">
-        Loading signal...
+      <div className="space-y-8 py-6">
+        <ColdStartBanner />
+        <NeuralSkeletonLoader count={2} message="SYNCHRONIZING ARTICLE TELEMETRY..." />
       </div>
     );
   }

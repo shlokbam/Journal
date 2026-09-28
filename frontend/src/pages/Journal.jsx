@@ -3,7 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { Search, SlidersHorizontal, FileText } from 'lucide-react';
 import { postsApi } from '../services/api';
 import { ArticleCard } from '../components/articles/ArticleCard';
-import { TechTag } from '../components/ui/TechTag';
+import { NeuralSkeletonLoader } from '../components/ui/NeuralSkeletonLoader';
+import { ColdStartBanner } from '../components/ui/ColdStartBanner';
 
 const CONTENT_TYPES = ['ALL', 'BUILD', 'THINK', 'LEARN', 'EXPLORE', 'INDUSTRY'];
 
@@ -53,6 +54,9 @@ export function Journal() {
 
   return (
     <div className="space-y-12">
+      {/* Cold Start Banner Notification */}
+      <ColdStartBanner />
+
       {/* Page Header */}
       <div className="space-y-4 max-w-5xl">
         <span className="text-xs font-mono text-[#6C8CFF] uppercase tracking-wider block">
@@ -141,9 +145,7 @@ export function Journal() {
       {/* Articles List */}
       <div className="space-y-4">
         {loading ? (
-          <div className="py-20 text-center font-mono text-sm text-[#6B7280]">
-            Fetching signals...
-          </div>
+          <NeuralSkeletonLoader count={3} message="DECODING NEURAL SIGNAL ARCHIVE..." />
         ) : posts.length === 0 ? (
           <div className="py-20 text-center space-y-3 bg-[#0D1117] rounded-xl border border-[#1D222B] p-8">
             <FileText className="w-8 h-8 text-[#6B7280] mx-auto" />
