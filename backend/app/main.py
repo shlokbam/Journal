@@ -39,31 +39,31 @@ def on_startup():
         # Seed i-built-a-full-devops-ci-cd-pipeline-from-scratch-here-s-everything-that-went-wrong
         existing_1 = db.query(Post).filter(Post.slug == "i-built-a-full-devops-ci-cd-pipeline-from-scratch-here-s-everything-that-went-wrong").first()
         if not existing_1:
-        tags_1 = []
-        t_ai = db.query(Tag).filter(Tag.name == "AI").first()
-        if not t_ai:
-            t_ai = Tag(name="AI", slug="ai")
-            db.add(t_ai)
-            db.commit()
-        tags_1.append(t_ai)
-        t_python = db.query(Tag).filter(Tag.name == "Python").first()
-        if not t_python:
-            t_python = Tag(name="Python", slug="python")
-            db.add(t_python)
-            db.commit()
-        tags_1.append(t_python)
-        t_react = db.query(Tag).filter(Tag.name == "React").first()
-        if not t_react:
-            t_react = Tag(name="React", slug="react")
-            db.add(t_react)
-            db.commit()
-        tags_1.append(t_react)
-        t_fastapi = db.query(Tag).filter(Tag.name == "FastAPI").first()
-        if not t_fastapi:
-            t_fastapi = Tag(name="FastAPI", slug="fastapi")
-            db.add(t_fastapi)
-            db.commit()
-        tags_1.append(t_fastapi)
+            tags_1 = []
+            t_ai = db.query(Tag).filter(Tag.name == "AI").first()
+            if not t_ai:
+                t_ai = Tag(name="AI", slug="ai")
+                db.add(t_ai)
+                db.commit()
+            tags_1.append(t_ai)
+            t_python = db.query(Tag).filter(Tag.name == "Python").first()
+            if not t_python:
+                t_python = Tag(name="Python", slug="python")
+                db.add(t_python)
+                db.commit()
+            tags_1.append(t_python)
+            t_react = db.query(Tag).filter(Tag.name == "React").first()
+            if not t_react:
+                t_react = Tag(name="React", slug="react")
+                db.add(t_react)
+                db.commit()
+            tags_1.append(t_react)
+            t_fastapi = db.query(Tag).filter(Tag.name == "FastAPI").first()
+            if not t_fastapi:
+                t_fastapi = Tag(name="FastAPI", slug="fastapi")
+                db.add(t_fastapi)
+                db.commit()
+            tags_1.append(t_fastapi)
 
             post_1 = Post(
                 title="I Built a Full DevOps CI/CD Pipeline from Scratch \u2014 Here's Everything That Went Wrong",
@@ -88,37 +88,37 @@ def on_startup():
         # Seed i-built-an-ai-data-analyst-app-from-scratch-here-s-how-i-taught-a-flask-app-to-think
         existing_2 = db.query(Post).filter(Post.slug == "i-built-an-ai-data-analyst-app-from-scratch-here-s-how-i-taught-a-flask-app-to-think").first()
         if not existing_2:
-        tags_2 = []
-        t_devops = db.query(Tag).filter(Tag.name == "DevOps").first()
-        if not t_devops:
-            t_devops = Tag(name="DevOps", slug="devops")
-            db.add(t_devops)
-            db.commit()
-        tags_2.append(t_devops)
-        t_docker = db.query(Tag).filter(Tag.name == "Docker").first()
-        if not t_docker:
-            t_docker = Tag(name="Docker", slug="docker")
-            db.add(t_docker)
-            db.commit()
-        tags_2.append(t_docker)
-        t_jenkins = db.query(Tag).filter(Tag.name == "Jenkins").first()
-        if not t_jenkins:
-            t_jenkins = Tag(name="Jenkins", slug="jenkins")
-            db.add(t_jenkins)
-            db.commit()
-        tags_2.append(t_jenkins)
-        t_fastapi = db.query(Tag).filter(Tag.name == "FastAPI").first()
-        if not t_fastapi:
-            t_fastapi = Tag(name="FastAPI", slug="fastapi")
-            db.add(t_fastapi)
-            db.commit()
-        tags_2.append(t_fastapi)
-        t_react = db.query(Tag).filter(Tag.name == "React").first()
-        if not t_react:
-            t_react = Tag(name="React", slug="react")
-            db.add(t_react)
-            db.commit()
-        tags_2.append(t_react)
+            tags_2 = []
+            t_devops = db.query(Tag).filter(Tag.name == "DevOps").first()
+            if not t_devops:
+                t_devops = Tag(name="DevOps", slug="devops")
+                db.add(t_devops)
+                db.commit()
+            tags_2.append(t_devops)
+            t_docker = db.query(Tag).filter(Tag.name == "Docker").first()
+            if not t_docker:
+                t_docker = Tag(name="Docker", slug="docker")
+                db.add(t_docker)
+                db.commit()
+            tags_2.append(t_docker)
+            t_jenkins = db.query(Tag).filter(Tag.name == "Jenkins").first()
+            if not t_jenkins:
+                t_jenkins = Tag(name="Jenkins", slug="jenkins")
+                db.add(t_jenkins)
+                db.commit()
+            tags_2.append(t_jenkins)
+            t_fastapi = db.query(Tag).filter(Tag.name == "FastAPI").first()
+            if not t_fastapi:
+                t_fastapi = Tag(name="FastAPI", slug="fastapi")
+                db.add(t_fastapi)
+                db.commit()
+            tags_2.append(t_fastapi)
+            t_react = db.query(Tag).filter(Tag.name == "React").first()
+            if not t_react:
+                t_react = Tag(name="React", slug="react")
+                db.add(t_react)
+                db.commit()
+            tags_2.append(t_react)
 
             post_2 = Post(
                 title="I Built an AI Data Analyst App from Scratch \u2014 Here's How I Taught a Flask App to Think",
@@ -143,31 +143,31 @@ def on_startup():
         # Seed i-built-an-ai-powered-mock-interview-platform-from-scratch-here-s-everything-that-went-wrong
         existing_3 = db.query(Post).filter(Post.slug == "i-built-an-ai-powered-mock-interview-platform-from-scratch-here-s-everything-that-went-wrong").first()
         if not existing_3:
-        tags_3 = []
-        t_ai = db.query(Tag).filter(Tag.name == "AI").first()
-        if not t_ai:
-            t_ai = Tag(name="AI", slug="ai")
-            db.add(t_ai)
-            db.commit()
-        tags_3.append(t_ai)
-        t_python = db.query(Tag).filter(Tag.name == "Python").first()
-        if not t_python:
-            t_python = Tag(name="Python", slug="python")
-            db.add(t_python)
-            db.commit()
-        tags_3.append(t_python)
-        t_react = db.query(Tag).filter(Tag.name == "React").first()
-        if not t_react:
-            t_react = Tag(name="React", slug="react")
-            db.add(t_react)
-            db.commit()
-        tags_3.append(t_react)
-        t_fastapi = db.query(Tag).filter(Tag.name == "FastAPI").first()
-        if not t_fastapi:
-            t_fastapi = Tag(name="FastAPI", slug="fastapi")
-            db.add(t_fastapi)
-            db.commit()
-        tags_3.append(t_fastapi)
+            tags_3 = []
+            t_ai = db.query(Tag).filter(Tag.name == "AI").first()
+            if not t_ai:
+                t_ai = Tag(name="AI", slug="ai")
+                db.add(t_ai)
+                db.commit()
+            tags_3.append(t_ai)
+            t_python = db.query(Tag).filter(Tag.name == "Python").first()
+            if not t_python:
+                t_python = Tag(name="Python", slug="python")
+                db.add(t_python)
+                db.commit()
+            tags_3.append(t_python)
+            t_react = db.query(Tag).filter(Tag.name == "React").first()
+            if not t_react:
+                t_react = Tag(name="React", slug="react")
+                db.add(t_react)
+                db.commit()
+            tags_3.append(t_react)
+            t_fastapi = db.query(Tag).filter(Tag.name == "FastAPI").first()
+            if not t_fastapi:
+                t_fastapi = Tag(name="FastAPI", slug="fastapi")
+                db.add(t_fastapi)
+                db.commit()
+            tags_3.append(t_fastapi)
 
             post_3 = Post(
                 title="I Built an AI-Powered Mock Interview Platform from Scratch \u2014 Here's Everything That Went Wrong",
@@ -192,31 +192,31 @@ def on_startup():
         # Seed i-built-an-enterprise-lms-with-local-cloud-devops-from-scratch-here-s-everything-that-went-wrong
         existing_4 = db.query(Post).filter(Post.slug == "i-built-an-enterprise-lms-with-local-cloud-devops-from-scratch-here-s-everything-that-went-wrong").first()
         if not existing_4:
-        tags_4 = []
-        t_ai = db.query(Tag).filter(Tag.name == "AI").first()
-        if not t_ai:
-            t_ai = Tag(name="AI", slug="ai")
-            db.add(t_ai)
-            db.commit()
-        tags_4.append(t_ai)
-        t_python = db.query(Tag).filter(Tag.name == "Python").first()
-        if not t_python:
-            t_python = Tag(name="Python", slug="python")
-            db.add(t_python)
-            db.commit()
-        tags_4.append(t_python)
-        t_react = db.query(Tag).filter(Tag.name == "React").first()
-        if not t_react:
-            t_react = Tag(name="React", slug="react")
-            db.add(t_react)
-            db.commit()
-        tags_4.append(t_react)
-        t_fastapi = db.query(Tag).filter(Tag.name == "FastAPI").first()
-        if not t_fastapi:
-            t_fastapi = Tag(name="FastAPI", slug="fastapi")
-            db.add(t_fastapi)
-            db.commit()
-        tags_4.append(t_fastapi)
+            tags_4 = []
+            t_ai = db.query(Tag).filter(Tag.name == "AI").first()
+            if not t_ai:
+                t_ai = Tag(name="AI", slug="ai")
+                db.add(t_ai)
+                db.commit()
+            tags_4.append(t_ai)
+            t_python = db.query(Tag).filter(Tag.name == "Python").first()
+            if not t_python:
+                t_python = Tag(name="Python", slug="python")
+                db.add(t_python)
+                db.commit()
+            tags_4.append(t_python)
+            t_react = db.query(Tag).filter(Tag.name == "React").first()
+            if not t_react:
+                t_react = Tag(name="React", slug="react")
+                db.add(t_react)
+                db.commit()
+            tags_4.append(t_react)
+            t_fastapi = db.query(Tag).filter(Tag.name == "FastAPI").first()
+            if not t_fastapi:
+                t_fastapi = Tag(name="FastAPI", slug="fastapi")
+                db.add(t_fastapi)
+                db.commit()
+            tags_4.append(t_fastapi)
 
             post_4 = Post(
                 title="Building Eagle LMS: How I Led a Full-Stack Industry-Sponsored Project from Napkin to Production",
@@ -241,37 +241,37 @@ def on_startup():
         # Seed i-built-dailydiff-an-autonomous-multi-agent-tech-research-editorial-team
         existing_5 = db.query(Post).filter(Post.slug == "i-built-dailydiff-an-autonomous-multi-agent-tech-research-editorial-team").first()
         if not existing_5:
-        tags_5 = []
-        t_ai = db.query(Tag).filter(Tag.name == "AI").first()
-        if not t_ai:
-            t_ai = Tag(name="AI", slug="ai")
-            db.add(t_ai)
-            db.commit()
-        tags_5.append(t_ai)
-        t_langgraph = db.query(Tag).filter(Tag.name == "LangGraph").first()
-        if not t_langgraph:
-            t_langgraph = Tag(name="LangGraph", slug="langgraph")
-            db.add(t_langgraph)
-            db.commit()
-        tags_5.append(t_langgraph)
-        t_fastapi = db.query(Tag).filter(Tag.name == "FastAPI").first()
-        if not t_fastapi:
-            t_fastapi = Tag(name="FastAPI", slug="fastapi")
-            db.add(t_fastapi)
-            db.commit()
-        tags_5.append(t_fastapi)
-        t_python = db.query(Tag).filter(Tag.name == "Python").first()
-        if not t_python:
-            t_python = Tag(name="Python", slug="python")
-            db.add(t_python)
-            db.commit()
-        tags_5.append(t_python)
-        t_react = db.query(Tag).filter(Tag.name == "React").first()
-        if not t_react:
-            t_react = Tag(name="React", slug="react")
-            db.add(t_react)
-            db.commit()
-        tags_5.append(t_react)
+            tags_5 = []
+            t_ai = db.query(Tag).filter(Tag.name == "AI").first()
+            if not t_ai:
+                t_ai = Tag(name="AI", slug="ai")
+                db.add(t_ai)
+                db.commit()
+            tags_5.append(t_ai)
+            t_langgraph = db.query(Tag).filter(Tag.name == "LangGraph").first()
+            if not t_langgraph:
+                t_langgraph = Tag(name="LangGraph", slug="langgraph")
+                db.add(t_langgraph)
+                db.commit()
+            tags_5.append(t_langgraph)
+            t_fastapi = db.query(Tag).filter(Tag.name == "FastAPI").first()
+            if not t_fastapi:
+                t_fastapi = Tag(name="FastAPI", slug="fastapi")
+                db.add(t_fastapi)
+                db.commit()
+            tags_5.append(t_fastapi)
+            t_python = db.query(Tag).filter(Tag.name == "Python").first()
+            if not t_python:
+                t_python = Tag(name="Python", slug="python")
+                db.add(t_python)
+                db.commit()
+            tags_5.append(t_python)
+            t_react = db.query(Tag).filter(Tag.name == "React").first()
+            if not t_react:
+                t_react = Tag(name="React", slug="react")
+                db.add(t_react)
+                db.commit()
+            tags_5.append(t_react)
 
             post_5 = Post(
                 title="I Built DailyDiff \u2014 An Autonomous Multi-Agent Tech Research & Editorial Team",
@@ -296,37 +296,37 @@ def on_startup():
         # Seed building-an-autonomous-multi-agent-ai-research-fact-auditing-system-with-langchain-mistral-and-rag
         existing_6 = db.query(Post).filter(Post.slug == "building-an-autonomous-multi-agent-ai-research-fact-auditing-system-with-langchain-mistral-and-rag").first()
         if not existing_6:
-        tags_6 = []
-        t_ai = db.query(Tag).filter(Tag.name == "AI").first()
-        if not t_ai:
-            t_ai = Tag(name="AI", slug="ai")
-            db.add(t_ai)
-            db.commit()
-        tags_6.append(t_ai)
-        t_langchain = db.query(Tag).filter(Tag.name == "LangChain").first()
-        if not t_langchain:
-            t_langchain = Tag(name="LangChain", slug="langchain")
-            db.add(t_langchain)
-            db.commit()
-        tags_6.append(t_langchain)
-        t_mistral = db.query(Tag).filter(Tag.name == "Mistral").first()
-        if not t_mistral:
-            t_mistral = Tag(name="Mistral", slug="mistral")
-            db.add(t_mistral)
-            db.commit()
-        tags_6.append(t_mistral)
-        t_rag = db.query(Tag).filter(Tag.name == "RAG").first()
-        if not t_rag:
-            t_rag = Tag(name="RAG", slug="rag")
-            db.add(t_rag)
-            db.commit()
-        tags_6.append(t_rag)
-        t_python = db.query(Tag).filter(Tag.name == "Python").first()
-        if not t_python:
-            t_python = Tag(name="Python", slug="python")
-            db.add(t_python)
-            db.commit()
-        tags_6.append(t_python)
+            tags_6 = []
+            t_ai = db.query(Tag).filter(Tag.name == "AI").first()
+            if not t_ai:
+                t_ai = Tag(name="AI", slug="ai")
+                db.add(t_ai)
+                db.commit()
+            tags_6.append(t_ai)
+            t_langchain = db.query(Tag).filter(Tag.name == "LangChain").first()
+            if not t_langchain:
+                t_langchain = Tag(name="LangChain", slug="langchain")
+                db.add(t_langchain)
+                db.commit()
+            tags_6.append(t_langchain)
+            t_mistral = db.query(Tag).filter(Tag.name == "Mistral").first()
+            if not t_mistral:
+                t_mistral = Tag(name="Mistral", slug="mistral")
+                db.add(t_mistral)
+                db.commit()
+            tags_6.append(t_mistral)
+            t_rag = db.query(Tag).filter(Tag.name == "RAG").first()
+            if not t_rag:
+                t_rag = Tag(name="RAG", slug="rag")
+                db.add(t_rag)
+                db.commit()
+            tags_6.append(t_rag)
+            t_python = db.query(Tag).filter(Tag.name == "Python").first()
+            if not t_python:
+                t_python = Tag(name="Python", slug="python")
+                db.add(t_python)
+                db.commit()
+            tags_6.append(t_python)
 
             post_6 = Post(
                 title="Building an Autonomous Multi-Agent AI Research & Fact-Auditing System with LangChain, Mistral, and RAG",
@@ -351,37 +351,37 @@ def on_startup():
         # Seed designing-a-real-time-enterprise-inventory-system-with-fifo-stock-reduction-automated-pdf-invoicing-and-telegram-webhooks
         existing_7 = db.query(Post).filter(Post.slug == "designing-a-real-time-enterprise-inventory-system-with-fifo-stock-reduction-automated-pdf-invoicing-and-telegram-webhooks").first()
         if not existing_7:
-        tags_7 = []
-        t_fastapi = db.query(Tag).filter(Tag.name == "FastAPI").first()
-        if not t_fastapi:
-            t_fastapi = Tag(name="FastAPI", slug="fastapi")
-            db.add(t_fastapi)
-            db.commit()
-        tags_7.append(t_fastapi)
-        t_postgresql = db.query(Tag).filter(Tag.name == "PostgreSQL").first()
-        if not t_postgresql:
-            t_postgresql = Tag(name="PostgreSQL", slug="postgresql")
-            db.add(t_postgresql)
-            db.commit()
-        tags_7.append(t_postgresql)
-        t_react = db.query(Tag).filter(Tag.name == "React").first()
-        if not t_react:
-            t_react = Tag(name="React", slug="react")
-            db.add(t_react)
-            db.commit()
-        tags_7.append(t_react)
-        t_python = db.query(Tag).filter(Tag.name == "Python").first()
-        if not t_python:
-            t_python = Tag(name="Python", slug="python")
-            db.add(t_python)
-            db.commit()
-        tags_7.append(t_python)
-        t_docker = db.query(Tag).filter(Tag.name == "Docker").first()
-        if not t_docker:
-            t_docker = Tag(name="Docker", slug="docker")
-            db.add(t_docker)
-            db.commit()
-        tags_7.append(t_docker)
+            tags_7 = []
+            t_fastapi = db.query(Tag).filter(Tag.name == "FastAPI").first()
+            if not t_fastapi:
+                t_fastapi = Tag(name="FastAPI", slug="fastapi")
+                db.add(t_fastapi)
+                db.commit()
+            tags_7.append(t_fastapi)
+            t_postgresql = db.query(Tag).filter(Tag.name == "PostgreSQL").first()
+            if not t_postgresql:
+                t_postgresql = Tag(name="PostgreSQL", slug="postgresql")
+                db.add(t_postgresql)
+                db.commit()
+            tags_7.append(t_postgresql)
+            t_react = db.query(Tag).filter(Tag.name == "React").first()
+            if not t_react:
+                t_react = Tag(name="React", slug="react")
+                db.add(t_react)
+                db.commit()
+            tags_7.append(t_react)
+            t_python = db.query(Tag).filter(Tag.name == "Python").first()
+            if not t_python:
+                t_python = Tag(name="Python", slug="python")
+                db.add(t_python)
+                db.commit()
+            tags_7.append(t_python)
+            t_docker = db.query(Tag).filter(Tag.name == "Docker").first()
+            if not t_docker:
+                t_docker = Tag(name="Docker", slug="docker")
+                db.add(t_docker)
+                db.commit()
+            tags_7.append(t_docker)
 
             post_7 = Post(
                 title="Designing a Real-Time Enterprise Inventory System with FIFO Stock Reduction, Automated PDF Invoicing, and Telegram Webhooks",
@@ -406,37 +406,37 @@ def on_startup():
         # Seed my-7-day-devops-lab-terraform-ansible-hashicorp-vault
         existing_8 = db.query(Post).filter(Post.slug == "my-7-day-devops-lab-terraform-ansible-hashicorp-vault").first()
         if not existing_8:
-        tags_8 = []
-        t_terraform = db.query(Tag).filter(Tag.name == "Terraform").first()
-        if not t_terraform:
-            t_terraform = Tag(name="Terraform", slug="terraform")
-            db.add(t_terraform)
-            db.commit()
-        tags_8.append(t_terraform)
-        t_ansible = db.query(Tag).filter(Tag.name == "Ansible").first()
-        if not t_ansible:
-            t_ansible = Tag(name="Ansible", slug="ansible")
-            db.add(t_ansible)
-            db.commit()
-        tags_8.append(t_ansible)
-        t_devops = db.query(Tag).filter(Tag.name == "DevOps").first()
-        if not t_devops:
-            t_devops = Tag(name="DevOps", slug="devops")
-            db.add(t_devops)
-            db.commit()
-        tags_8.append(t_devops)
-        t_aws = db.query(Tag).filter(Tag.name == "AWS").first()
-        if not t_aws:
-            t_aws = Tag(name="AWS", slug="aws")
-            db.add(t_aws)
-            db.commit()
-        tags_8.append(t_aws)
-        t_docker = db.query(Tag).filter(Tag.name == "Docker").first()
-        if not t_docker:
-            t_docker = Tag(name="Docker", slug="docker")
-            db.add(t_docker)
-            db.commit()
-        tags_8.append(t_docker)
+            tags_8 = []
+            t_terraform = db.query(Tag).filter(Tag.name == "Terraform").first()
+            if not t_terraform:
+                t_terraform = Tag(name="Terraform", slug="terraform")
+                db.add(t_terraform)
+                db.commit()
+            tags_8.append(t_terraform)
+            t_ansible = db.query(Tag).filter(Tag.name == "Ansible").first()
+            if not t_ansible:
+                t_ansible = Tag(name="Ansible", slug="ansible")
+                db.add(t_ansible)
+                db.commit()
+            tags_8.append(t_ansible)
+            t_devops = db.query(Tag).filter(Tag.name == "DevOps").first()
+            if not t_devops:
+                t_devops = Tag(name="DevOps", slug="devops")
+                db.add(t_devops)
+                db.commit()
+            tags_8.append(t_devops)
+            t_aws = db.query(Tag).filter(Tag.name == "AWS").first()
+            if not t_aws:
+                t_aws = Tag(name="AWS", slug="aws")
+                db.add(t_aws)
+                db.commit()
+            tags_8.append(t_aws)
+            t_docker = db.query(Tag).filter(Tag.name == "Docker").first()
+            if not t_docker:
+                t_docker = Tag(name="Docker", slug="docker")
+                db.add(t_docker)
+                db.commit()
+            tags_8.append(t_docker)
 
             post_8 = Post(
                 title="My 7-Day DevOps Lab: How I Learned Terraform, Ansible, and HashiCorp Vault by Building Real Infrastructure",
@@ -461,37 +461,37 @@ def on_startup():
         # Seed exploring-model-context-protocol-mcp-ai-tools-streamlit-emailmd
         existing_9 = db.query(Post).filter(Post.slug == "exploring-model-context-protocol-mcp-ai-tools-streamlit-emailmd").first()
         if not existing_9:
-        tags_9 = []
-        t_mcp = db.query(Tag).filter(Tag.name == "MCP").first()
-        if not t_mcp:
-            t_mcp = Tag(name="MCP", slug="mcp")
-            db.add(t_mcp)
-            db.commit()
-        tags_9.append(t_mcp)
-        t_ai = db.query(Tag).filter(Tag.name == "AI").first()
-        if not t_ai:
-            t_ai = Tag(name="AI", slug="ai")
-            db.add(t_ai)
-            db.commit()
-        tags_9.append(t_ai)
-        t_python = db.query(Tag).filter(Tag.name == "Python").first()
-        if not t_python:
-            t_python = Tag(name="Python", slug="python")
-            db.add(t_python)
-            db.commit()
-        tags_9.append(t_python)
-        t_streamlit = db.query(Tag).filter(Tag.name == "Streamlit").first()
-        if not t_streamlit:
-            t_streamlit = Tag(name="Streamlit", slug="streamlit")
-            db.add(t_streamlit)
-            db.commit()
-        tags_9.append(t_streamlit)
-        t_fastmcp = db.query(Tag).filter(Tag.name == "FastMCP").first()
-        if not t_fastmcp:
-            t_fastmcp = Tag(name="FastMCP", slug="fastmcp")
-            db.add(t_fastmcp)
-            db.commit()
-        tags_9.append(t_fastmcp)
+            tags_9 = []
+            t_mcp = db.query(Tag).filter(Tag.name == "MCP").first()
+            if not t_mcp:
+                t_mcp = Tag(name="MCP", slug="mcp")
+                db.add(t_mcp)
+                db.commit()
+            tags_9.append(t_mcp)
+            t_ai = db.query(Tag).filter(Tag.name == "AI").first()
+            if not t_ai:
+                t_ai = Tag(name="AI", slug="ai")
+                db.add(t_ai)
+                db.commit()
+            tags_9.append(t_ai)
+            t_python = db.query(Tag).filter(Tag.name == "Python").first()
+            if not t_python:
+                t_python = Tag(name="Python", slug="python")
+                db.add(t_python)
+                db.commit()
+            tags_9.append(t_python)
+            t_streamlit = db.query(Tag).filter(Tag.name == "Streamlit").first()
+            if not t_streamlit:
+                t_streamlit = Tag(name="Streamlit", slug="streamlit")
+                db.add(t_streamlit)
+                db.commit()
+            tags_9.append(t_streamlit)
+            t_fastmcp = db.query(Tag).filter(Tag.name == "FastMCP").first()
+            if not t_fastmcp:
+                t_fastmcp = Tag(name="FastMCP", slug="fastmcp")
+                db.add(t_fastmcp)
+                db.commit()
+            tags_9.append(t_fastmcp)
 
             post_9 = Post(
                 title="Exploring Model Context Protocol (MCP): Building AI Tools, Streamlit Clients, and emailmd Assistants",
@@ -516,37 +516,37 @@ def on_startup():
         # Seed hands-on-agentic-ai-langgraph-sequential-parallel-conditional-workflows
         existing_10 = db.query(Post).filter(Post.slug == "hands-on-agentic-ai-langgraph-sequential-parallel-conditional-workflows").first()
         if not existing_10:
-        tags_10 = []
-        t_agentic_ai = db.query(Tag).filter(Tag.name == "Agentic AI").first()
-        if not t_agentic_ai:
-            t_agentic_ai = Tag(name="Agentic AI", slug="agentic-ai")
-            db.add(t_agentic_ai)
-            db.commit()
-        tags_10.append(t_agentic_ai)
-        t_langgraph = db.query(Tag).filter(Tag.name == "LangGraph").first()
-        if not t_langgraph:
-            t_langgraph = Tag(name="LangGraph", slug="langgraph")
-            db.add(t_langgraph)
-            db.commit()
-        tags_10.append(t_langgraph)
-        t_ai = db.query(Tag).filter(Tag.name == "AI").first()
-        if not t_ai:
-            t_ai = Tag(name="AI", slug="ai")
-            db.add(t_ai)
-            db.commit()
-        tags_10.append(t_ai)
-        t_python = db.query(Tag).filter(Tag.name == "Python").first()
-        if not t_python:
-            t_python = Tag(name="Python", slug="python")
-            db.add(t_python)
-            db.commit()
-        tags_10.append(t_python)
-        t_state_graphs = db.query(Tag).filter(Tag.name == "State Graphs").first()
-        if not t_state_graphs:
-            t_state_graphs = Tag(name="State Graphs", slug="state-graphs")
-            db.add(t_state_graphs)
-            db.commit()
-        tags_10.append(t_state_graphs)
+            tags_10 = []
+            t_agentic_ai = db.query(Tag).filter(Tag.name == "Agentic AI").first()
+            if not t_agentic_ai:
+                t_agentic_ai = Tag(name="Agentic AI", slug="agentic-ai")
+                db.add(t_agentic_ai)
+                db.commit()
+            tags_10.append(t_agentic_ai)
+            t_langgraph = db.query(Tag).filter(Tag.name == "LangGraph").first()
+            if not t_langgraph:
+                t_langgraph = Tag(name="LangGraph", slug="langgraph")
+                db.add(t_langgraph)
+                db.commit()
+            tags_10.append(t_langgraph)
+            t_ai = db.query(Tag).filter(Tag.name == "AI").first()
+            if not t_ai:
+                t_ai = Tag(name="AI", slug="ai")
+                db.add(t_ai)
+                db.commit()
+            tags_10.append(t_ai)
+            t_python = db.query(Tag).filter(Tag.name == "Python").first()
+            if not t_python:
+                t_python = Tag(name="Python", slug="python")
+                db.add(t_python)
+                db.commit()
+            tags_10.append(t_python)
+            t_state_graphs = db.query(Tag).filter(Tag.name == "State Graphs").first()
+            if not t_state_graphs:
+                t_state_graphs = Tag(name="State Graphs", slug="state-graphs")
+                db.add(t_state_graphs)
+                db.commit()
+            tags_10.append(t_state_graphs)
 
             post_10 = Post(
                 title="Hands-On Agentic AI with LangGraph: Building Sequential, Parallel, and Conditional State Workflows",
@@ -571,37 +571,37 @@ def on_startup():
         # Seed my-langsmith-learning-log-tracing-debugging-optimizing-llm-chains-rag
         existing_11 = db.query(Post).filter(Post.slug == "my-langsmith-learning-log-tracing-debugging-optimizing-llm-chains-rag").first()
         if not existing_11:
-        tags_11 = []
-        t_langsmith = db.query(Tag).filter(Tag.name == "LangSmith").first()
-        if not t_langsmith:
-            t_langsmith = Tag(name="LangSmith", slug="langsmith")
-            db.add(t_langsmith)
-            db.commit()
-        tags_11.append(t_langsmith)
-        t_llm_observability = db.query(Tag).filter(Tag.name == "LLM Observability").first()
-        if not t_llm_observability:
-            t_llm_observability = Tag(name="LLM Observability", slug="llm-observability")
-            db.add(t_llm_observability)
-            db.commit()
-        tags_11.append(t_llm_observability)
-        t_tracing = db.query(Tag).filter(Tag.name == "Tracing").first()
-        if not t_tracing:
-            t_tracing = Tag(name="Tracing", slug="tracing")
-            db.add(t_tracing)
-            db.commit()
-        tags_11.append(t_tracing)
-        t_ai = db.query(Tag).filter(Tag.name == "AI").first()
-        if not t_ai:
-            t_ai = Tag(name="AI", slug="ai")
-            db.add(t_ai)
-            db.commit()
-        tags_11.append(t_ai)
-        t_python = db.query(Tag).filter(Tag.name == "Python").first()
-        if not t_python:
-            t_python = Tag(name="Python", slug="python")
-            db.add(t_python)
-            db.commit()
-        tags_11.append(t_python)
+            tags_11 = []
+            t_langsmith = db.query(Tag).filter(Tag.name == "LangSmith").first()
+            if not t_langsmith:
+                t_langsmith = Tag(name="LangSmith", slug="langsmith")
+                db.add(t_langsmith)
+                db.commit()
+            tags_11.append(t_langsmith)
+            t_llm_observability = db.query(Tag).filter(Tag.name == "LLM Observability").first()
+            if not t_llm_observability:
+                t_llm_observability = Tag(name="LLM Observability", slug="llm-observability")
+                db.add(t_llm_observability)
+                db.commit()
+            tags_11.append(t_llm_observability)
+            t_tracing = db.query(Tag).filter(Tag.name == "Tracing").first()
+            if not t_tracing:
+                t_tracing = Tag(name="Tracing", slug="tracing")
+                db.add(t_tracing)
+                db.commit()
+            tags_11.append(t_tracing)
+            t_ai = db.query(Tag).filter(Tag.name == "AI").first()
+            if not t_ai:
+                t_ai = Tag(name="AI", slug="ai")
+                db.add(t_ai)
+                db.commit()
+            tags_11.append(t_ai)
+            t_python = db.query(Tag).filter(Tag.name == "Python").first()
+            if not t_python:
+                t_python = Tag(name="Python", slug="python")
+                db.add(t_python)
+                db.commit()
+            tags_11.append(t_python)
 
             post_11 = Post(
                 title="My LangSmith Learning Log: Tracing, Debugging, and Optimizing LLM Chains and RAG Pipelines",
@@ -626,37 +626,37 @@ def on_startup():
         # Seed building-generative-ai-apps-langchain-document-loaders-chromadb-lcel
         existing_12 = db.query(Post).filter(Post.slug == "building-generative-ai-apps-langchain-document-loaders-chromadb-lcel").first()
         if not existing_12:
-        tags_12 = []
-        t_generative_ai = db.query(Tag).filter(Tag.name == "Generative AI").first()
-        if not t_generative_ai:
-            t_generative_ai = Tag(name="Generative AI", slug="generative-ai")
-            db.add(t_generative_ai)
-            db.commit()
-        tags_12.append(t_generative_ai)
-        t_langchain = db.query(Tag).filter(Tag.name == "LangChain").first()
-        if not t_langchain:
-            t_langchain = Tag(name="LangChain", slug="langchain")
-            db.add(t_langchain)
-            db.commit()
-        tags_12.append(t_langchain)
-        t_lcel = db.query(Tag).filter(Tag.name == "LCEL").first()
-        if not t_lcel:
-            t_lcel = Tag(name="LCEL", slug="lcel")
-            db.add(t_lcel)
-            db.commit()
-        tags_12.append(t_lcel)
-        t_rag = db.query(Tag).filter(Tag.name == "RAG").first()
-        if not t_rag:
-            t_rag = Tag(name="RAG", slug="rag")
-            db.add(t_rag)
-            db.commit()
-        tags_12.append(t_rag)
-        t_chromadb = db.query(Tag).filter(Tag.name == "ChromaDB").first()
-        if not t_chromadb:
-            t_chromadb = Tag(name="ChromaDB", slug="chromadb")
-            db.add(t_chromadb)
-            db.commit()
-        tags_12.append(t_chromadb)
+            tags_12 = []
+            t_generative_ai = db.query(Tag).filter(Tag.name == "Generative AI").first()
+            if not t_generative_ai:
+                t_generative_ai = Tag(name="Generative AI", slug="generative-ai")
+                db.add(t_generative_ai)
+                db.commit()
+            tags_12.append(t_generative_ai)
+            t_langchain = db.query(Tag).filter(Tag.name == "LangChain").first()
+            if not t_langchain:
+                t_langchain = Tag(name="LangChain", slug="langchain")
+                db.add(t_langchain)
+                db.commit()
+            tags_12.append(t_langchain)
+            t_lcel = db.query(Tag).filter(Tag.name == "LCEL").first()
+            if not t_lcel:
+                t_lcel = Tag(name="LCEL", slug="lcel")
+                db.add(t_lcel)
+                db.commit()
+            tags_12.append(t_lcel)
+            t_rag = db.query(Tag).filter(Tag.name == "RAG").first()
+            if not t_rag:
+                t_rag = Tag(name="RAG", slug="rag")
+                db.add(t_rag)
+                db.commit()
+            tags_12.append(t_rag)
+            t_chromadb = db.query(Tag).filter(Tag.name == "ChromaDB").first()
+            if not t_chromadb:
+                t_chromadb = Tag(name="ChromaDB", slug="chromadb")
+                db.add(t_chromadb)
+                db.commit()
+            tags_12.append(t_chromadb)
 
             post_12 = Post(
                 title="Building Generative AI Apps with LangChain: Document Loaders, Text Splitters, ChromaDB, and LCEL",
