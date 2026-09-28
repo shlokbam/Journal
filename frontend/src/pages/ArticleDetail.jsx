@@ -238,9 +238,9 @@ export function ArticleDetail() {
             </ReactMarkdown>
           </main>
 
-          {/* Sticky Desktop TOC Sidebar */}
-          <aside className="hidden lg:block lg:col-span-4 relative">
-            <div className="sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto p-6 rounded-xl bg-[#0D1117] border border-[#1D222B] shadow-2xl space-y-6">
+          {/* Freezed Desktop TOC Sidebar */}
+          <aside className="hidden lg:block lg:col-span-4 sticky top-24 self-start">
+            <div className="p-6 rounded-xl bg-[#0D1117] border border-[#1D222B] shadow-2xl space-y-6">
               <TableOfContents headings={headings} />
 
               {post.github_repo && (

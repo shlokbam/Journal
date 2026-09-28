@@ -37,11 +37,11 @@ export function TableOfContents({ headings }) {
 
   return (
     <nav className="space-y-3 font-mono text-xs">
-      <div className="text-[11px] font-bold text-[#6B7280] tracking-wider uppercase pb-2 border-b border-[#1D222B] flex items-center justify-between sticky top-0 bg-[#0D1117] z-10 py-1">
+      <div className="text-[11px] font-bold text-[#6B7280] tracking-wider uppercase pb-2 border-b border-[#1D222B] flex items-center justify-between">
         <span>ON THIS PAGE</span>
         <span className="text-[10px] text-[#6C8CFF] font-semibold">{headings.length} SECTIONS</span>
       </div>
-      <ul className="space-y-1 relative max-h-[calc(100vh-14rem)] overflow-y-auto pr-1">
+      <ul className="space-y-1 relative">
         {headings.map((item, idx) => {
           const num = String(idx + 1).padStart(2, '0');
           const isActive = activeId === item.id;
