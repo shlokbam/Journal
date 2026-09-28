@@ -904,8 +904,162 @@ export function ArticleImageEmbed({ src, alt }) {
         </div>
       );
 
-    default:
-      // Fallback for normal markdown images
+    // ----------------------------------------------------
+    // LEARN ARTICLES HERO CARDS
+    // ----------------------------------------------------
+    case 'agentic-hero':
+      return (
+        <div className="my-8 rounded-2xl overflow-hidden bg-[#0D1117] border border-[#1D222B] shadow-2xl p-8 bg-gradient-to-br from-[#0B1528] via-[#0D1117] to-[#131C31]">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="space-y-4 max-w-xl">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#6C8CFF]/10 text-[#6C8CFF] font-mono text-xs border border-[#6C8CFF]/20">
+                <Brain className="w-3.5 h-3.5" /> LangGraph State Graph & Agentic AI
+              </div>
+              <h3 className="text-3xl font-extrabold text-[#F5F7FA] tracking-tight">
+                LangGraph — <span className="text-[#6C8CFF]">Agentic State Machine</span> Lab
+              </h3>
+              <p className="text-sm text-[#9CA3AF] leading-relaxed">
+                Sequential execution, parallel fan-out/fan-in, conditional discriminant routing, TypedDict state reducers, and visual graph flowcharts.
+              </p>
+              <div className="flex flex-wrap gap-2 pt-2">
+                {['LangGraph', 'Python 3.12', 'State Graphs', 'TypedDict', 'Conditional Routing', 'Mistral AI'].map((tag) => (
+                  <span key={tag} className="px-2.5 py-1 rounded-md bg-[#161B26] border border-[#1D222B] text-[11px] font-mono text-[#6C8CFF]">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="p-6 rounded-2xl bg-[#08090B] border border-[#6C8CFF]/30 text-[#6C8CFF] font-mono text-center space-y-2 w-full md:w-64 shadow-lg">
+              <div className="text-3xl font-black">3 WORKFLOWS</div>
+              <div className="text-[10px] text-[#6B7280] uppercase tracking-wider">Sequential • Parallel • Conditional</div>
+              <div className="text-xs text-[#6C8CFF] pt-2 border-t border-[#1D222B]">LangChain & State Graph Patterns</div>
+            </div>
+          </div>
+        </div>
+      );
+
+    case 'mcp-hero':
+      return (
+        <div className="my-8 rounded-2xl overflow-hidden bg-[#0D1117] border border-[#1D222B] shadow-2xl p-8 bg-gradient-to-br from-[#161224] via-[#0D1117] to-[#14122B]">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="space-y-4 max-w-xl">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-500/10 text-purple-400 font-mono text-xs border border-purple-500/20">
+                <Cpu className="w-3.5 h-3.5" /> Anthropic Model Context Protocol
+              </div>
+              <h3 className="text-3xl font-extrabold text-[#F5F7FA] tracking-tight">
+                MCP — <span className="text-purple-400">Client, Server & FastMCP</span> Lab
+              </h3>
+              <p className="text-sm text-[#9CA3AF] leading-relaxed">
+                Streamlit MCP Client, Stdio & SSE Transports, FastMCP Python SDK, emailmd API connectivity, and dynamic tool discovery.
+              </p>
+              <div className="flex flex-wrap gap-2 pt-2">
+                {['MCP Standard', 'FastMCP', 'JSON-RPC 2.0', 'Streamlit', 'LangGraph', 'Stdio Transport'].map((tag) => (
+                  <span key={tag} className="px-2.5 py-1 rounded-md bg-[#161B26] border border-[#1D222B] text-[11px] font-mono text-purple-300">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="p-6 rounded-2xl bg-[#08090B] border border-purple-500/30 text-purple-400 font-mono text-center space-y-2 w-full md:w-64 shadow-lg">
+              <div className="text-3xl font-black">JSON-RPC 2.0</div>
+              <div className="text-[10px] text-[#6B7280] uppercase tracking-wider">Universal AI Tool Protocol</div>
+              <div className="text-xs text-purple-300 pt-2 border-t border-[#1D222B]">Tools • Resources • Prompts</div>
+            </div>
+          </div>
+        </div>
+      );
+
+    case 'langsmith-hero':
+      return (
+        <div className="my-8 rounded-2xl overflow-hidden bg-[#0D1117] border border-[#1D222B] shadow-2xl p-8 bg-gradient-to-br from-[#0F1E19] via-[#0D1117] to-[#12241E]">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="space-y-4 max-w-xl">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 font-mono text-xs border border-emerald-500/20">
+                <Activity className="w-3.5 h-3.5" /> LLM Observability & Benchmarking
+              </div>
+              <h3 className="text-3xl font-extrabold text-[#F5F7FA] tracking-tight">
+                LangSmith — <span className="text-emerald-400">Tracing & RAG Debugging</span> Lab
+              </h3>
+              <p className="text-sm text-[#9CA3AF] leading-relaxed">
+                Auto-tracing execution, nested span trees, custom tags, token cost auditing, and RAG optimization across 4 iterations on statistical text corpora.
+              </p>
+              <div className="flex flex-wrap gap-2 pt-2">
+                {['LangSmith', 'Auto-Tracing', 'Span Trees', 'FAISS', 'Mistral AI', 'RAG Optimization'].map((tag) => (
+                  <span key={tag} className="px-2.5 py-1 rounded-md bg-[#161B26] border border-[#1D222B] text-[11px] font-mono text-emerald-300">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="p-6 rounded-2xl bg-[#08090B] border border-emerald-500/30 text-emerald-400 font-mono text-center space-y-2 w-full md:w-64 shadow-lg">
+              <div className="text-3xl font-black">5 EXPERIMENTS</div>
+              <div className="text-[10px] text-[#6B7280] uppercase tracking-wider">Simple Traces to PDF RAG v4</div>
+              <div className="text-xs text-emerald-300 pt-2 border-t border-[#1D222B]">LangChain Observability</div>
+            </div>
+          </div>
+        </div>
+      );
+
+    case 'genai-hero':
+      return (
+        <div className="my-8 rounded-2xl overflow-hidden bg-[#0D1117] border border-[#1D222B] shadow-2xl p-8 bg-gradient-to-br from-[#1B180E] via-[#0D1117] to-[#241F10]">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="space-y-4 max-w-xl">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 text-amber-400 font-mono text-xs border border-amber-500/20">
+                <Sparkles className="w-3.5 h-3.5" /> Generative AI & LCEL Pipelines
+              </div>
+              <h3 className="text-3xl font-extrabold text-[#F5F7FA] tracking-tight">
+                Generative AI — <span className="text-amber-400">RAG, ChromaDB & LCEL</span> Hub
+              </h3>
+              <p className="text-sm text-[#9CA3AF] leading-relaxed">
+                PyPDF/Text/Web loaders, RecursiveCharacterTextSplitter, ChromaDB vector indexing, LCEL pipe runnables, and Streamlit agent UI dashboards.
+              </p>
+              <div className="flex flex-wrap gap-2 pt-2">
+                {['Generative AI', 'LangChain', 'LCEL', 'ChromaDB', 'Groq', 'Streamlit', 'Mistral AI'].map((tag) => (
+                  <span key={tag} className="px-2.5 py-1 rounded-md bg-[#161B26] border border-[#1D222B] text-[11px] font-mono text-amber-300">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="p-6 rounded-2xl bg-[#08090B] border border-amber-500/30 text-amber-400 font-mono text-center space-y-2 w-full md:w-64 shadow-lg">
+              <div className="text-3xl font-black">RAG + LCEL</div>
+              <div className="text-[10px] text-[#6B7280] uppercase tracking-wider">Document Ingestion & Agents</div>
+              <div className="text-xs text-amber-300 pt-2 border-t border-[#1D222B]">Modular AI Codebase</div>
+            </div>
+          </div>
+        </div>
+      );
+
+    default: {
+      const isUrl = src && (src.startsWith('http://') || src.startsWith('https://') || src.startsWith('/') || src.startsWith('data:') || src.startsWith('blob:'));
+
+      if (!isUrl) {
+        // Fallback for non-URL identifier tags (prevents browser broken image icons)
+        return (
+          <div className="my-8 rounded-2xl overflow-hidden bg-[#0D1117] border border-[#1D222B] shadow-2xl p-6 sm:p-8 bg-gradient-to-br from-[#0D1117] via-[#11141A] to-[#161B26]">
+            <div className="flex items-center justify-between border-b border-[#1D222B] pb-4 mb-4 font-mono text-xs text-[#6B7280]">
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full bg-rose-500/80 inline-block" />
+                <span className="w-3 h-3 rounded-full bg-amber-500/80 inline-block" />
+                <span className="w-3 h-3 rounded-full bg-emerald-500/80 inline-block" />
+                <span className="text-[#6C8CFF] font-bold ml-2">// SYSTEM MODULE</span>
+              </div>
+              <span className="text-emerald-400">HANDS-ON LAB</span>
+            </div>
+            <div className="space-y-3">
+              <h4 className="text-xl sm:text-2xl font-extrabold text-[#F5F7FA] tracking-tight">
+                {alt || src.replace(/-/g, ' ').toUpperCase()}
+              </h4>
+              <p className="text-xs sm:text-sm text-[#9CA3AF] leading-relaxed font-mono">
+                Hands-on engineering module — view detailed code patterns, execution logs, and architecture in the repository.
+              </p>
+            </div>
+          </div>
+        );
+      }
+
+      // Fallback for normal markdown image URLs
       return (
         <figure className="my-8 space-y-2">
           <img
@@ -920,6 +1074,7 @@ export function ArticleImageEmbed({ src, alt }) {
           )}
         </figure>
       );
+    }
   }
 }
 
