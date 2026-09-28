@@ -111,7 +111,7 @@ export const JOURNAL_POSTS = [
     "status": "PUBLISHED",
     "featured": true,
     "published_at": "2026-06-12",
-    "cover_image": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop",
+    "cover_image": "https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=1000&auto=format&fit=crop",
     "author": "Shlok Bam",
     "project_slug": null,
     "github_repo": "shlokbam/DailyDiff"
@@ -135,7 +135,7 @@ export const JOURNAL_POSTS = [
     "status": "PUBLISHED",
     "featured": true,
     "published_at": "2026-05-20",
-    "cover_image": "https://images.unsplash.com/photo-1677442136019-21780efad99a?q=80&w=1000&auto=format&fit=crop",
+    "cover_image": "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?q=80&w=1000&auto=format&fit=crop",
     "author": "Shlok Bam",
     "project_slug": null,
     "github_repo": "shlokbam/Multi_Agent_AI_Research_System"
@@ -207,7 +207,7 @@ export const JOURNAL_POSTS = [
     "status": "PUBLISHED",
     "featured": true,
     "published_at": "2026-08-10",
-    "cover_image": "https://images.unsplash.com/photo-1620712943543-bcc4688e7485?q=80&w=1000&auto=format&fit=crop",
+    "cover_image": "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?q=80&w=1000&auto=format&fit=crop",
     "author": "Shlok Bam",
     "project_slug": null,
     "github_repo": "shlokbam/MCP--Model-Context-Protocol-"
@@ -231,7 +231,7 @@ export const JOURNAL_POSTS = [
     "status": "PUBLISHED",
     "featured": true,
     "published_at": "2026-08-20",
-    "cover_image": "https://images.unsplash.com/photo-1507238691740-187a5b1d37b8?q=80&w=1000&auto=format&fit=crop",
+    "cover_image": "https://images.unsplash.com/photo-1531403009284-440f080d1e12?q=80&w=1000&auto=format&fit=crop",
     "author": "Shlok Bam",
     "project_slug": null,
     "github_repo": "shlokbam/Agnetic_AI"

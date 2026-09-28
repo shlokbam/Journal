@@ -29,7 +29,7 @@ export function ArticleCard({ post, index, variant = 'grid' }) {
             {post.cover_image && !imgFailed ? (
               <img
                 src={post.cover_image}
-                alt={post.title}
+                alt=""
                 onError={() => setImgFailed(true)}
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out opacity-85 group-hover:opacity-100"
               />
