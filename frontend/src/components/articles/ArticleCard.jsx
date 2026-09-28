@@ -25,7 +25,7 @@ export function ArticleCard({ post, index, variant = 'grid' }) {
           className="group relative flex flex-col justify-between h-full rounded-2xl bg-[#0D1117] border border-[#1D222B] hover:border-[#6C8CFF]/40 hover:bg-[#11141A] transition-all duration-300 shadow-md hover:shadow-2xl hover:shadow-[#6C8CFF]/10 overflow-hidden"
         >
           {/* Top Banner Image / Graphic */}
-          <div className="relative aspect-[16/9] w-full overflow-hidden bg-[#08090B] border-b border-[#1D222B]">
+          <div className="relative aspect-[16/9] max-h-52 w-full overflow-hidden bg-[#08090B] border-b border-[#1D222B]">
             {post.cover_image && !imgFailed ? (
               <img
                 src={post.cover_image}

@@ -187,9 +187,9 @@ export function Home() {
           </Link>
         </div>
 
-        <div className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {latestPosts.map((post, idx) => (
-            <ArticleCard key={post.id} post={post} index={idx} />
+            <ArticleCard key={post.id} post={post} index={idx} variant="grid" />
           ))}
         </div>
       </section>
