@@ -6,8 +6,9 @@ export function ArticleImageEmbed({ src, alt }) {
   // Render custom screenshot / diagram cards based on image src identifier
   switch (src) {
     // ----------------------------------------------------
-    // ARTICLE 1: DevOps Pipeline Postmortem
+    // PROJECT-SPECIFIC HERO BANNERS
     // ----------------------------------------------------
+    case 'devops-hero':
     case 'hero-banner':
       return (
         <div className="my-8 rounded-2xl overflow-hidden bg-[#0D1117] border border-[#1D222B] shadow-2xl">
@@ -84,6 +85,312 @@ export function ArticleImageEmbed({ src, alt }) {
                 <div className="text-right">
                   <span className="text-[#F5F7FA] font-bold">Shlok Bam</span><br />
                   <span>shlokbam.dev</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+
+    case 'dailydiff-hero':
+      return (
+        <div className="my-8 rounded-2xl overflow-hidden bg-[#0D1117] border border-[#1D222B] shadow-2xl">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-0">
+            <div className="lg:col-span-6 p-5 bg-[#08090B] border-r border-[#1D222B] font-mono text-xs space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-[#1D222B]">
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full bg-rose-500/80 inline-block"></span>
+                  <span className="w-3 h-3 rounded-full bg-amber-500/80 inline-block"></span>
+                  <span className="w-3 h-3 rounded-full bg-emerald-500/80 inline-block"></span>
+                </div>
+                <span className="text-[#6B7280]">run_agent.py — LangGraph 7-Agent DAG</span>
+              </div>
+
+              <div className="text-[#9CA3AF] space-y-1 text-[11px]">
+                <p className="text-[#6C8CFF]">$ python backend/run_agent.py</p>
+                <p className="text-[#6B7280]">[Scout] Ingested 30 HN topstories + GitHub Releases</p>
+                <p className="text-[#6B7280]">[Skeptic] Deduplicated 22 links, 8 passed hype filter</p>
+                <p className="text-emerald-400">✓ [Research] Cleaned target READMEs & release notes</p>
+                <p className="text-emerald-400">✓ [Verifier] Technical assertions verified against docs</p>
+                <p className="text-amber-300">★ [Analyst] Rated: 2 INTEGRATE, 2 WATCH, 1 READ</p>
+                <p className="text-indigo-400">⚡ [Editor] Applied ELI5 rules & compiled 5-point TL;DR</p>
+              </div>
+
+              <div className="pt-3 border-t border-[#1D222B] space-y-1.5 text-[11px]">
+                <div className="flex items-center justify-between text-[#6B7280]">
+                  <span>Primary Engine: <strong className="text-[#F5F7FA]">Mistral 8x22b</strong></span>
+                  <span className="text-emerald-400 font-bold">ACTIVE</span>
+                </div>
+                <div className="flex items-center justify-between text-[#6B7280]">
+                  <span>Failover Backup: <strong className="text-[#F5F7FA]">Gemini Flash 3.5</strong></span>
+                  <span className="text-amber-400">READY</span>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] flex items-center justify-between font-mono">
+                <span>[Publisher] Email Brief Dispatched</span>
+                <span className="font-bold">Brevo API 200 OK</span>
+              </div>
+            </div>
+
+            <div className="lg:col-span-6 p-8 flex flex-col justify-between bg-gradient-to-br from-[#0D1117] via-[#0F141F] to-[#121929]">
+              <div className="space-y-4">
+                <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-[#6C8CFF]/10 text-[#6C8CFF] font-mono text-xs border border-[#6C8CFF]/20">
+                  <Sparkles className="w-3.5 h-3.5" /> Autonomous Editorial Engine
+                </div>
+                <h3 className="text-2xl sm:text-3xl font-extrabold text-[#F5F7FA] tracking-tight leading-tight">
+                  DailyDiff — <span className="text-[#6C8CFF]">7-Agent LangGraph</span> Editorial Team
+                </h3>
+                <p className="text-sm text-[#9CA3AF]">
+                  "We scan the noise, five things survive." Automated multi-agent intelligence filtering tech noise into sharp developer briefings.
+                </p>
+
+                <div className="flex flex-wrap gap-2 pt-2">
+                  {['LangGraph', 'Python 3.12', 'FastAPI', 'Mistral AI', 'Gemini Flash', 'Brevo API', 'Vite + React', 'dailydiff.in'].map((tag) => (
+                    <span key={tag} className="px-2.5 py-1 rounded-md bg-[#161B26] border border-[#1D222B] text-[11px] font-mono text-[#6C8CFF]">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-8 flex items-center justify-between border-t border-[#1D222B] text-xs font-mono text-[#6B7280]">
+                <div>
+                  <span className="text-[#F5F7FA] font-semibold">0% Marketing Hype.</span><br />
+                  <span className="text-emerald-400 font-semibold">100% Verified Code.</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-[#F5F7FA] font-bold">Shlok Bam</span><br />
+                  <span>dailydiff.in</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+
+    case 'multiagent-hero':
+      return (
+        <div className="my-8 rounded-2xl overflow-hidden bg-[#0D1117] border border-[#1D222B] shadow-2xl">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-0">
+            <div className="lg:col-span-6 p-5 bg-[#08090B] border-r border-[#1D222B] font-mono text-xs space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-[#1D222B]">
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full bg-rose-500/80 inline-block"></span>
+                  <span className="w-3 h-3 rounded-full bg-amber-500/80 inline-block"></span>
+                  <span className="w-3 h-3 rounded-full bg-emerald-500/80 inline-block"></span>
+                </div>
+                <span className="text-[#6B7280]">pipeline.py — Asynchronous Telemetry</span>
+              </div>
+
+              <div className="text-[#9CA3AF] space-y-1 text-[11px]">
+                <p className="text-purple-400">$ GET /api/research?topic=Fusion+Reactor</p>
+                <p className="text-[#6B7280]">[Search Agent] Tavily Parallel Indexer query 200 OK</p>
+                <p className="text-emerald-400">✓ [Reader Agent] Sanitized DOM: stripped &lt;script&gt;/&lt;nav&gt;</p>
+                <p className="text-[#6B7280]">[Reader Agent] Text length capped at 3,000 clean chars</p>
+                <p className="text-[#F5F7FA]">✓ [Writer Specialist] Drafted multi-section markdown report</p>
+                <p className="text-amber-300">★ [Review Critic] Score: 9.2/10 — Passed Fact Audit</p>
+              </div>
+
+              <div className="pt-3 border-t border-[#1D222B] space-y-1.5 text-[11px]">
+                <div className="flex items-center justify-between text-[#6B7280]">
+                  <span>RAG Chunking: <strong className="text-[#F5F7FA]">1000 chars / 200 overlap</strong></span>
+                  <span className="text-purple-400">Mistral Embed</span>
+                </div>
+                <div className="flex items-center justify-between text-[#6B7280]">
+                  <span>Vector Store: <strong className="text-[#F5F7FA]">Pinecone Cloud</strong></span>
+                  <span className="text-emerald-400 font-bold">SYNCED</span>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-300 text-[11px] flex items-center justify-between font-mono">
+                <span>[FastAPI Server] SSE Event Stream</span>
+                <span className="font-bold">Streaming Active</span>
+              </div>
+            </div>
+
+            <div className="lg:col-span-6 p-8 flex flex-col justify-between bg-gradient-to-br from-[#0D1117] via-[#150E24] to-[#201336]">
+              <div className="space-y-4">
+                <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-purple-500/10 text-purple-400 font-mono text-xs border border-purple-500/20">
+                  <Brain className="w-3.5 h-3.5" /> Multi-Agent AI System
+                </div>
+                <h3 className="text-2xl sm:text-3xl font-extrabold text-[#F5F7FA] tracking-tight leading-tight">
+                  Autonomous AI <span className="text-purple-400">Research & Fact Audit</span> System
+                </h3>
+                <p className="text-sm text-[#9CA3AF]">
+                  Asynchronous multi-agent pipeline with DOM sanitization, peer-auditing, vector RAG indexing, and SSE telemetry streaming.
+                </p>
+
+                <div className="flex flex-wrap gap-2 pt-2">
+                  {['LangChain', 'Python 3.13', 'Mistral AI', 'Tavily Search', 'Pinecone', 'ChromaDB', 'FastAPI SSE'].map((tag) => (
+                    <span key={tag} className="px-2.5 py-1 rounded-md bg-[#161B26] border border-[#1D222B] text-[11px] font-mono text-purple-300">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-8 flex items-center justify-between border-t border-[#1D222B] text-xs font-mono text-[#6B7280]">
+                <div>
+                  <span className="text-[#F5F7FA] font-semibold">0% Hallucinations.</span><br />
+                  <span className="text-purple-400 font-semibold">100% Peer Audited.</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-[#F5F7FA] font-bold">Shlok Bam</span><br />
+                  <span>github.com/shlokbam</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+
+    case 'inventory-hero':
+      return (
+        <div className="my-8 rounded-2xl overflow-hidden bg-[#0D1117] border border-[#1D222B] shadow-2xl">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-0">
+            <div className="lg:col-span-6 p-5 bg-[#08090B] border-r border-[#1D222B] font-mono text-xs space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-[#1D222B]">
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full bg-rose-500/80 inline-block"></span>
+                  <span className="w-3 h-3 rounded-full bg-amber-500/80 inline-block"></span>
+                  <span className="w-3 h-3 rounded-full bg-emerald-500/80 inline-block"></span>
+                </div>
+                <span className="text-[#6B7280]">stock_service.py — FIFO & Locking</span>
+              </div>
+
+              <div className="text-[#9CA3AF] space-y-1 text-[11px]">
+                <p className="text-emerald-400">$ POST /api/transactions (Qty: 50 units)</p>
+                <p className="text-amber-300">🔒 SQL: SELECT * FROM batches WITH FOR UPDATE</p>
+                <p className="text-emerald-400">✓ Deducted 20 units from Batch #101 (Oldest)</p>
+                <p className="text-emerald-400">✓ Deducted 30 units from Batch #104 (Next Oldest)</p>
+                <p className="text-[#6B7280]">✓ Customer Ledger Updated: Balance $145.00</p>
+                <p className="text-[#F5F7FA]">✓ ReportLab PDF Invoice Generated (In-Memory)</p>
+              </div>
+
+              <div className="pt-3 border-t border-[#1D222B] space-y-1.5 text-[11px]">
+                <div className="flex items-center justify-between text-[#6B7280]">
+                  <span>DB Concurrency: <strong className="text-[#F5F7FA]">Pessimistic Locking</strong></span>
+                  <span className="text-emerald-400 font-bold">SAFE</span>
+                </div>
+                <div className="flex items-center justify-between text-[#6B7280]">
+                  <span>Precision Engine: <strong className="text-[#F5F7FA]">Decimal NUMERIC(10,2)</strong></span>
+                  <span className="text-emerald-400">EXACT</span>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] flex items-center justify-between font-mono">
+                <span>[Telegram Bot] Webhook Dispatched</span>
+                <span className="font-bold">PDF Invoice Sent</span>
+              </div>
+            </div>
+
+            <div className="lg:col-span-6 p-8 flex flex-col justify-between bg-gradient-to-br from-[#0D1117] via-[#0E1F1A] to-[#122E26]">
+              <div className="space-y-4">
+                <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 font-mono text-xs border border-emerald-500/20">
+                  <Database className="w-3.5 h-3.5" /> Enterprise Systems
+                </div>
+                <h3 className="text-2xl sm:text-3xl font-extrabold text-[#F5F7FA] tracking-tight leading-tight">
+                  Enterprise <span className="text-emerald-400">Inventory & FIFO</span> System
+                </h3>
+                <p className="text-sm text-[#9CA3AF]">
+                  Real-time inventory management with FIFO stock reduction, transaction concurrency locks, ReportLab PDF billing, and Telegram alerts.
+                </p>
+
+                <div className="flex flex-wrap gap-2 pt-2">
+                  {['FastAPI', 'SQLAlchemy', 'PostgreSQL', 'FIFO Engine', 'ReportLab PDF', 'Telegram API', 'React', 'TailwindCSS'].map((tag) => (
+                    <span key={tag} className="px-2.5 py-1 rounded-md bg-[#161B26] border border-[#1D222B] text-[11px] font-mono text-emerald-300">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-8 flex items-center justify-between border-t border-[#1D222B] text-xs font-mono text-[#6B7280]">
+                <div>
+                  <span className="text-[#F5F7FA] font-semibold">0 Race Conditions.</span><br />
+                  <span className="text-emerald-400 font-semibold">Instant Telegram Billing.</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-[#F5F7FA] font-bold">Shlok Bam</span><br />
+                  <span>github.com/shlokbam</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+
+    case 'eagle-lms-hero':
+    case 'lms-hero':
+      return (
+        <div className="my-8 rounded-2xl overflow-hidden bg-[#0D1117] border border-[#1D222B] shadow-2xl">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-0">
+            <div className="lg:col-span-6 p-5 bg-[#08090B] border-r border-[#1D222B] font-mono text-xs space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-[#1D222B]">
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full bg-rose-500/80 inline-block"></span>
+                  <span className="w-3 h-3 rounded-full bg-amber-500/80 inline-block"></span>
+                  <span className="w-3 h-3 rounded-full bg-emerald-500/80 inline-block"></span>
+                </div>
+                <span className="text-[#6B7280]">eagle_lms — Industry Project</span>
+              </div>
+
+              <div className="text-[#9CA3AF] space-y-1 text-[11px]">
+                <p className="text-[#6C8CFF]">$ Client: Eagle Industrial Services Pvt. Ltd.</p>
+                <p className="text-[#6B7280]">Workforce Scale: 2,500+ Security Guards & Housekeeping</p>
+                <p className="text-emerald-400">✓ 7 Industry Stakeholder Meetings Executed</p>
+                <p className="text-emerald-400">✓ Phased Module Delivery & Timed MCQ Assessments</p>
+                <p className="text-amber-300">★ ReportLab + Pillow PDF Watermark Engine</p>
+                <p className="text-indigo-400">⚡ Web Portal (React+Vite) + Mobile App (Expo React Native)</p>
+              </div>
+
+              <div className="pt-3 border-t border-[#1D222B] space-y-1.5 text-[11px]">
+                <div className="flex items-center justify-between text-[#6B7280]">
+                  <span>Team Size: <strong className="text-[#F5F7FA]">5 Students (VIT Pune)</strong></span>
+                  <span className="text-emerald-400 font-bold">COMPLETED</span>
+                </div>
+                <div className="flex items-center justify-between text-[#6B7280]">
+                  <span>Industry Sponsor: <strong className="text-[#F5F7FA]">Mr. Manish Godse</strong></span>
+                  <span className="text-emerald-400">Eagle Securities</span>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-[11px] flex items-center justify-between font-mono">
+                <span>[Status] Code Review & QA Testing</span>
+                <span className="font-bold">Production Ready</span>
+              </div>
+            </div>
+
+            <div className="lg:col-span-6 p-8 flex flex-col justify-between bg-gradient-to-br from-[#0D1117] via-[#101424] to-[#161C33]">
+              <div className="space-y-4">
+                <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-indigo-500/10 text-indigo-400 font-mono text-xs border border-indigo-500/20">
+                  <Layers className="w-3.5 h-3.5" /> Industry Sponsored LMS
+                </div>
+                <h3 className="text-2xl sm:text-3xl font-extrabold text-[#F5F7FA] tracking-tight leading-tight">
+                  Building <span className="text-indigo-400">Eagle LMS</span>: From Napkin to Production
+                </h3>
+                <p className="text-sm text-[#9CA3AF]">
+                  An enterprise Learning Management System for 2,500+ workforce. 7 meetings, real production bugs, watermark engine, and cross-platform deployment.
+                </p>
+
+                <div className="flex flex-wrap gap-2 pt-2">
+                  {['React + Vite', 'Expo React Native', 'FastAPI', 'PostgreSQL', 'ReportLab', 'Pillow', 'JWT Auth'].map((tag) => (
+                    <span key={tag} className="px-2.5 py-1 rounded-md bg-[#161B26] border border-[#1D222B] text-[11px] font-mono text-indigo-300">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-8 flex items-center justify-between border-t border-[#1D222B] text-xs font-mono text-[#6B7280]">
+                <div>
+                  <span className="text-[#F5F7FA] font-semibold">2,500+ Active Users.</span><br />
+                  <span className="text-indigo-400 font-semibold">Web + Mobile Apps.</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-[#F5F7FA] font-bold">Shlok Bam</span><br />
+                  <span>VIT Pune</span>
                 </div>
               </div>
             </div>
