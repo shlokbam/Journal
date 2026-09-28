@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowUpRight, Clock, Calendar } from 'lucide-react';
@@ -6,6 +6,7 @@ import { Badge } from '../ui/Badge';
 
 export function ArticleCard({ post, index, variant = 'grid' }) {
   const formattedNumber = String(index + 1).padStart(2, '0');
+  const [imgFailed, setImgFailed] = useState(false);
 
   // ----------------------------------------------------
   // 1. GRID / BOX CARD VARIANT (Square / Box proportions)
@@ -25,15 +26,17 @@ export function ArticleCard({ post, index, variant = 'grid' }) {
         >
           {/* Top Banner Image / Graphic */}
           <div className="relative aspect-[16/9] w-full overflow-hidden bg-[#08090B] border-b border-[#1D222B]">
-            {post.cover_image ? (
+            {post.cover_image && !imgFailed ? (
               <img
                 src={post.cover_image}
                 alt={post.title}
+                onError={() => setImgFailed(true)}
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out opacity-85 group-hover:opacity-100"
               />
             ) : (
-              <div className="w-full h-full bg-gradient-to-br from-[#11141A] to-[#08090B] flex items-center justify-center">
-                <span className="font-mono text-3xl font-extrabold text-[#1D222B] group-hover:text-[#6C8CFF]/20 transition-colors">
+              <div className="w-full h-full bg-gradient-to-br from-[#161B26] via-[#11141A] to-[#08090B] flex items-center justify-center relative">
+                <div className="absolute inset-0 bg-[radial-gradient(#6C8CFF_1px,transparent_1px)] [background-size:16px_16px] opacity-20" />
+                <span className="font-mono text-4xl font-extrabold text-[#6C8CFF]/30 group-hover:text-[#6C8CFF]/60 transition-colors z-10">
                   #{formattedNumber}
                 </span>
               </div>
