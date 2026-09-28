@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Search, SlidersHorizontal, FileText } from 'lucide-react';
 import { postsApi } from '../services/api';
 import { ArticleCard } from '../components/articles/ArticleCard';
+import { TechTag } from '../components/ui/TechTag';
 import { NeuralSkeletonLoader } from '../components/ui/NeuralSkeletonLoader';
 import { ColdStartBanner } from '../components/ui/ColdStartBanner';
 
