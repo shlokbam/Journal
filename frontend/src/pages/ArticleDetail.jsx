@@ -227,8 +227,15 @@ export function ArticleDetail() {
                 },
                 img: ({ src, alt }) => <ArticleImageEmbed src={src} alt={alt} />,
                 code: ({ node, inline, className, children, ...props }) => {
-                  if (inline) {
-                    return <code className={className} {...props}>{children}</code>;
+                  const content = String(children);
+                  const isInline = inline || (!className && !content.includes('\n'));
+
+                  if (isInline) {
+                    return (
+                      <code className="font-mono text-[#6C8CFF] bg-[#11141A] px-1.5 py-0.5 rounded border border-[#1D222B] text-[0.875em]" {...props}>
+                        {children}
+                      </code>
+                    );
                   }
                   return <CodeBlock className={className}>{children}</CodeBlock>;
                 },
