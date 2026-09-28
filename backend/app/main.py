@@ -35,6 +35,760 @@ def on_startup():
     # Initial Data Seeding
     db = SessionLocal()
     try:
+        
+        # Seed i-built-dailydiff-an-autonomous-multi-agent-tech-research-editorial-team
+        existing_5 = db.query(Post).filter(Post.slug == "i-built-dailydiff-an-autonomous-multi-agent-tech-research-editorial-team").first()
+        if not existing_5:
+            post_5 = Post(
+                title="I Built DailyDiff — An Autonomous Multi-Agent Tech Research & Editorial Team",
+                slug="i-built-dailydiff-an-autonomous-multi-agent-tech-research-editorial-team",
+                excerpt="How I engineered an autonomous 7-agent editorial system using LangGraph, FastAPI, and Brevo to filter technical noise from GitHub, arXiv, and Dev.to into sharp 5-point developer briefings.",
+                content="""![DailyDiff Hero Banner](hero-banner)
+
+# Before We Start — Why I Built This
+
+Every morning as a software developer, I faced the same routine: opening Hacker News, GitHub Trending, Dev.to, and Twitter, wading through hundreds of clickbait articles, 15-minute AI wrappers, and rehashed marketing posts just to find 2 or 3 genuine engineering updates.
+
+I wanted an automated system that operated under one strict philosophy: **"We scan the noise, five things survive."**
+
+So I built **DailyDiff** — an autonomous multi-agent tech research and editorial team powered by **LangGraph**, **FastAPI**, **Vite + React**, and **Brevo**. It runs on a scheduled cron workflow (Mon, Wed, Fri at 03:30 UTC), ingests raw signals from across the web, sanitizes and verifies technical claims, evaluates developer utility, compiles a sharp 5-item briefing, and emails it directly to subscribers.
+
+This post breaks down the entire system architecture, the 7-agent LangGraph workflow, multi-LLM resiliency, real engineering bugs, and how it was deployed live at `dailydiff.in`.
+
+---
+
+## 1. System Architecture & The 7-Agent Graph
+
+DailyDiff is built as a Directed Acyclic Graph (DAG) using **LangGraph**. Unlike simple chain-of-thought prompts, LangGraph allows stateful agent nodes to read from and write to a shared thread state dictionary (`AgentState`).
+
+Here is the high-level system architecture:
+
+```text
+               ┌──────────────────────────────────────────┐
+               │    Scout Agent (Multi-Source Scraper)    │
+               │  Hacker News API • Dev.to • GitHub API   │
+               └────────────────────┬─────────────────────┘
+                                    │
+                                    ▼
+               ┌──────────────────────────────────────────┐
+               │  Skeptic Agent (Deduplication & Hype)    │
+               │  History JSON check + Zero-shot LLM filter│
+               └────────────────────┬─────────────────────┘
+                                    │
+                                    ▼
+               ┌──────────────────────────────────────────┐
+               │    Research Agent (DOM Crawler & Docs)   │
+               │  Fetches raw READMEs & release notes     │
+               └────────────────────┬─────────────────────┘
+                                    │
+                                    ▼
+               ┌──────────────────────────────────────────┐
+               │  Verifier Agent (Fact & Claim Checker)   │
+               │  Cross-checks assertions against source  │
+               └────────────────────┬─────────────────────┘
+                                    │
+                                    ▼
+               ┌──────────────────────────────────────────┐
+               │     Analyst Agent (Developer Utility)    │
+               │  Assigns: WATCH, INTEGRATE, or READ      │
+               └────────────────────┬─────────────────────┘
+                                    │
+                                    ▼
+               ┌──────────────────────────────────────────┐
+               │   Editor Agent (ELI5 & TL;DR Compiler)   │
+               │  Trims jargon & formats top 5 briefing   │
+               └────────────────────┬─────────────────────┘
+                                    │
+                                    ▼
+               ┌──────────────────────────────────────────┐
+               │    Publisher Agent (Archive & Dispatch)  │
+               │  Git CMS save + Brevo API email dispatch │
+               └──────────────────────────────────────────┘
+```
+
+### Tech Stack
+
+| Domain | Technology |
+| :--- | :--- |
+| **Agent Orchestration** | Python 3.12, LangGraph, LangChain |
+| **Primary AI Engine** | Mistral AI (`open-mixtral-8x22b` / `mistral-small-latest`) |
+| **Fail-safe AI Fallback** | Google Gemini (`gemini-3.5-flash`) |
+| **Web Service API** | FastAPI, Uvicorn, Pydantic |
+| **Database** | SQLite locally, Neon Cloud Postgres in production |
+| **Email Dispatcher** | Brevo REST API v3 (custom domain `briefs@dailydiff.in`) |
+| **Frontend Client** | Vite + React with custom glassmorphism design tokens |
+| **Automation** | GitHub Actions (`thrice_weekly_brief.yml` cron) |
+
+---
+
+## 2. Deep Dive into Agent Specialization
+
+Each node in the LangGraph network operates with a single responsibility and clean input/output contracts.
+
+### Node 1 — Scout Agent (Multi-Source Ingestion)
+The Scout node pulls technical signals from three primary channels:
+1. **Hacker News**: Fetches the top 30 item IDs via Firebase REST API (`/v0/topstories.json`) and extracts titles, URLs, and score metadata.
+2. **Dev.to Feed**: Scrapes trending backend and system design RSS feeds.
+3. **GitHub Releases API**: Queries release tag metadata for major core frameworks (`react`, `next.js`, `fastapi`, `tailwindcss`, `django`, `go`).
+
+```python
+async def fetch_hn_top_stories(limit: int = 30) -> list[dict]:
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        res = await client.get("https://hacker-news.firebaseio.com/v0/topstories.json")
+        story_ids = res.json()[:limit]
+        tasks = [client.get(f"https://hacker-news.firebaseio.com/v0/item/{sid}.json") for sid in story_ids]
+        responses = await asyncio.gather(*tasks, return_exceptions=True)
+        return [r.json() for r in responses if hasattr(r, 'status_code') and r.status_code == 200]
+```
+
+### Node 2 — Skeptic Agent (Deduplication & Hype Filter)
+Raw scraped links contain massive duplicates and low-effort promotional posts. The Skeptic node runs a two-tier filtering strategy:
+- **Algorithmic Deduplication**: Normalizes URLs and checks against `data/history.json` (archived past briefings).
+- **Hype Filter**: Passes candidates through a zero-shot classification prompt to discard marketing fluff, non-technical opinion pieces, and speculative financial news.
+
+> 💡 **Simple Version:** The Scout agent gathers everything like a net thrown in the ocean. The Skeptic agent immediately throws back 80% of the catch — discarding duplicates, advertisements, and sensational clickbait before any heavy processing happens.
+
+### Node 3 & 4 — Research & Verifier Agents
+- **Research Agent**: Visits target URLs, strips boilerplate script/nav markup, and extracts the core technical content or README text.
+- **Verifier Agent**: Reads technical assertions (e.g. *"Reduces memory by 40%"* or *"Supports zero-copy deserialization"*) and cross-references them against raw release notes or benchmark documentation.
+
+### Node 5 & 6 — Analyst & Editor Agents
+- **Analyst Agent**: Evaluates direct utility for working software engineers, categorizing each item into an actionable verdict:
+  - `INTEGRATE`: Production-ready tool or critical security update.
+  - `WATCH`: Promising technology worth tracking.
+  - `READ`: Foundational architecture paper or engineering postmortem.
+- **Editor Agent**: Enforces **ELI5** (Explain Like I'm 5) readability standards, limits output to a maximum of $\le 5$ curated items, and prepends a bold 1-sentence **TL;DR** summary.
+
+---
+
+## 3. Resiliency Engineering: The Multi-LLM Fallback Engine
+
+Relying on a single LLM API provider in an automated cron environment is risky due to rate limits (`HTTP 429`), temporary server outages (`HTTP 500/503`), or context window timeouts.
+
+To guarantee 99.9% pipeline execution success, I built a custom **`MistralToGeminiFallback`** wrapper class:
+
+```python
+class MistralToGeminiFallback:
+    def __init__(self, primary_client, fallback_client):
+        self.primary = primary_client
+        self.fallback = fallback_client
+
+    async def generate(self, prompt: str, system_prompt: str) -> str:
+        try:
+            # Primary execution via Mistral AI
+            response = await self.primary.ainvoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=prompt)
+            ])
+            return response.content
+        except Exception as err:
+            logger.warning(f"[FAILOVER] Mistral API failed ({err}). Rerouting request to Gemini Flash...")
+            # Automatic failover to Google Gemini
+            response = await self.fallback.ainvoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=prompt)
+            ])
+            return response.content
+```
+
+> 💡 **Simple Version:** Imagine hiring a primary editor (Mistral). If Mistral gets stuck in traffic or doesn't pick up the phone, the system instantly hands the draft to a back-up editor (Gemini) without crashing the pipeline.
+
+---
+
+## 4. Real Engineering Bugs & Hard Lessons
+
+Building an autonomous editorial pipeline triggered several subtle production bugs:
+
+### Bug 1 — Silent Webhook Failures from GitHub Actions
+- **Symptom**: The GitHub Actions runner completed with exit code 0, but no emails were dispatched to subscribers.
+- **Root Cause**: The runner sent a HTTP POST request to Render backend `/api/notify-subscribers`, but because the endpoint lacked proper header authentication, Render quietly returned `401 Unauthorized`. GitHub Actions curl ignored the 401 response status code because `--fail` flag wasn't set.
+- **Fix**: Added a custom secret header `X-Auth-Token: <NOTIFY_SECRET_TOKEN>` verified by FastAPI security dependencies, and added `-f` (`--fail`) to the curl command in `.github/workflows/thrice_weekly_brief.yml`.
+
+### Bug 2 — Brevo vs Gmail SMTP TLS Handshake Timeout
+- **Symptom**: Local email dispatch worked via Gmail SMTP (`smtp.gmail.com:587`), but failed on Render production servers with `socket.timeout`.
+- **Root Cause**: Render free-tier instances block outbound SMTP port 587 to prevent spam abuse.
+- **Fix**: Switched email dispatching from raw SMTP sockets to **Brevo v3 REST API over HTTP/443** using `httpx.AsyncClient`. HTTP requests pass cleanly through cloud firewalls without socket blocks.
+
+### Bug 3 — Deduplication State Explosion
+- **Symptom**: The same Hacker News discussion was included twice in consecutive briefings if shared via different URLs (e.g. `https://news.ycombinator.com/item?id=12345` vs `https://example.com/blog?utm_source=hn`).
+- **Root Cause**: String equality check on raw URLs failed due to tracking parameters.
+- **Fix**: Built a URL canonicalization utility that strips tracking parameters (`utm_*`, `ref`, `source`) and normalizes domain names before hashing.
+
+---
+
+## 5. Summary of Bugs & Resolutions
+
+| Problem | Root Cause | Engineering Solution |
+| :--- | :--- | :--- |
+| **Silent GHA webhook failure** | 401 response swallowed by curl | Added `X-Auth-Token` validation + `curl -f` fail-on-error flag |
+| **Render SMTP timeout** | Port 587 blocked on cloud provider | Replaced raw SMTP with Brevo HTTP REST API v3 |
+| **Duplicate article inclusions** | Tracking parameters in URLs (`utm_source`) | Canonicalized URLs and normalized domain hashes |
+| **LangGraph concurrent state overwrite** | Parallel nodes mutating list state | Used `Annotated[list, operator.add]` operator reducers |
+
+---
+
+## 6. What I'd Do Differently & Key Takeaways
+
+1. **Implement RAG for Past Briefings**: Allow subscribers to ask questions across all past briefing archives using vector embeddings.
+2. **Dynamic Topic Personalization**: Let users select tags (`AI`, `DevOps`, `Frontend`, `Rust`) to receive customized briefing variants.
+3. **Automated E2E Testing**: Add mock HTTP fixtures for Hacker News and GitHub APIs in pytest to test pipeline runs without burning LLM API tokens.
+
+### Key Takeaways
+- **Multi-agent state machine design**: Breaking complex tasks into discrete agents with strict Pydantic inputs/outputs is infinitely easier to debug than single long prompts.
+- **LLM failover wrappers are essential**: Production AI workflows must handle 429/500 errors gracefully with automated fallback providers.
+- **Always verify HTTP status codes in CRON jobs**: Never assume a curl command succeeded just because the container didn't crash.
+
+---
+
+## 7. Resources & Links
+
+- **Live Briefing Dashboard**: [https://dailydiff.in](https://dailydiff.in)
+- **GitHub Repository**: [github.com/shlokbam/DailyDiff](https://github.com/shlokbam/DailyDiff)
+- **LangGraph Documentation**: [langchain-ai.github.io/langgraph](https://langchain-ai.github.io/langgraph/)
+- **Brevo API v3 Specs**: [developers.brevo.com](https://developers.brevo.com/)
+""",
+                content_type="BUILD",
+                category="DevOps",
+                status="PUBLISHED",
+                reading_time="18 min read",
+                featured=True,
+                cover_image="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop",
+                author="Shlok Bam",
+                project_slug=None,
+                github_repo="shlokbam/DailyDiff",
+                published_at="2026-06-12"
+            )
+            for t_name in ["AI", "LangGraph", "FastAPI", "Python", "React"]:
+                tag = db.query(Tag).filter(Tag.name == t_name).first()
+                if not tag:
+                    tag = Tag(name=t_name, slug=t_name.lower().replace(" ", "-"))
+                    db.add(tag)
+                post_5.tags.append(tag)
+            db.add(post_5)
+            db.commit()
+
+        # Seed building-an-autonomous-multi-agent-ai-research-fact-auditing-system-with-langchain-mistral-and-rag
+        existing_6 = db.query(Post).filter(Post.slug == "building-an-autonomous-multi-agent-ai-research-fact-auditing-system-with-langchain-mistral-and-rag").first()
+        if not existing_6:
+            post_6 = Post(
+                title="Building an Autonomous Multi-Agent AI Research & Fact-Auditing System with LangChain, Mistral, and RAG",
+                slug="building-an-autonomous-multi-agent-ai-research-fact-auditing-system-with-langchain-mistral-and-rag",
+                excerpt="A deep breakdown of constructing an asynchronous multi-agent research pipeline that crawls the web, sanitizes DOMs, drafts comprehensive technical reports, audits facts, and indexes vectors into Pinecone & ChromaDB.",
+                content="""![Multi-Agent Research Hero Banner](hero-banner)
+
+# Before We Start — Why Single-Prompt LLMs Fail at Deep Research
+
+Ask ChatGPT or any standard LLM to write a comprehensive technical research report on a complex topic like *"Advances in Fusion Reactor Core Containment"*.
+
+You will usually get a generic 5-paragraph summary. It will sound confident, but it will lack recent domain citations, suffer from knowledge cutoff gaps, miss critical technical nuances, and occasionally hallucinate plausible-sounding statistics.
+
+Single-prompt LLMs fail at deep research for three fundamental reasons:
+1. **No Real-Time Web Exploration**: They rely on static weights or basic un-sanitized web search snippets.
+2. **No Factual Auditing Loop**: They lack a secondary agent to critique, verify, and score the output.
+3. **Token Context Bloat**: Raw HTML pages clutter context windows with JavaScript scripts, CSS, and navigation headers.
+
+To solve this, I built the **Multi-Agent AI Research & Fact-Auditing System** — an asynchronous multi-agent pipeline built on **LangChain**, **FastAPI**, **Mistral AI**, **Tavily**, **BeautifulSoup**, and **Pinecone / ChromaDB**.
+
+This post breaks down the full architectural flow, real-time SSE streaming telemetry, RAG vector indexing, and key debugging insights.
+
+---
+
+## 1. Multi-Agent Architecture Overview
+
+The system operates as an asynchronous pipeline governed by five specialized roles:
+
+```text
+┌────────────────────────────────────────────────────────────────────────┐
+│                        User Input (Research Topic)                     │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│  Search Agent (Tavily Parallel Indexer)                                │
+│  Discovers top 5 high-authority domain URLs and content snippets      │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│  Reader Agent (DOM Sanitizer & Web Scraper)                            │
+│  Strips script/style/nav tags, normalizes text (max 3,000 chars)       │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│  Writer Specialist (Synthesis Engine)                                  │
+│  Drafts multi-section markdown paper with citation anchors             │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│  Review Critic (Quality & Fact Auditor)                                │
+│  Evaluates academic score (X/10), strengths, & areas to improve        │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│  RAG Knowledge Ingestion Pipeline                                      │
+│  RecursiveCharacterTextSplitter ➔ Mistral Embeddings ➔ Pinecone/Chroma │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+### Tech Stack
+
+| Component | Technology |
+| :--- | :--- |
+| **Agent Framework** | Python 3.13, LangChain |
+| **LLM Provider** | Mistral AI (`open-mixtral-8x22b`) |
+| **Search Engine API** | Tavily Search Client |
+| **HTML Sanitizer** | BeautifulSoup4 (`bs4`) |
+| **Vector DB (RAG)** | Pinecone Cloud (Primary) / ChromaDB (Local fallback) |
+| **Embeddings** | `MistralAIEmbeddings` (`mistral-embed`) |
+| **Streaming API** | FastAPI ASGI Server with Server-Sent Events (SSE) |
+
+---
+
+## 2. Technical Implementation & Agent Specialization
+
+### Agent 1 — Search Agent (Tavily Parallel Indexer)
+The Search Agent uses Tavily API to execute deep domain queries. Instead of grabbing raw HTML for 50 pages, it retrieves top 5 targeted results with clean 300-character normalized snippets.
+
+```python
+@tool
+def web_search(query: str) -> str:
+    """Search the web for recent and reliable technical information on a topic."""
+    tavily = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
+    response = tavily.search(query=query, max_results=5, search_depth="advanced")
+    
+    results = []
+    for item in response.get("results", []):
+        results.append(f"Title: {item['title']}\nURL: {item['url']}\nSnippet: {item['content']}\n")
+    return "\n---\n".join(results)
+```
+
+### Agent 2 — Reader Agent (DOM Sanitization & Scraping)
+When given a target URL, raw scraping often yields 100KB+ of inline JavaScript, CSS styles, and navigation menus. The Reader Agent uses `BeautifulSoup` with explicit tag decomposition and strict timeout controls:
+
+```python
+@tool
+def scrape_url(url: str) -> str:
+    """Scrape and return clean text content from a given URL."""
+    headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"}
+    try:
+        res = requests.get(url, headers=headers, timeout=8)
+        soup = BeautifulSoup(res.text, "html.parser")
+        
+        # Decompose non-content nodes
+        for element in soup(["script", "style", "nav", "footer", "header", "form"]):
+            element.decompose()
+            
+        text = soup.get_text(separator=" ")
+        clean_text = " ".join(text.split())
+        return clean_text[:3000] # Cap text payload to avoid context bloat
+    except Exception as e:
+        return f"Error scraping URL: {str(e)}"
+```
+
+> 💡 **Simple Version:** If a website is a messy newspaper filled with ads, popups, and nav bars, the Reader agent cuts out only the core news article paragraph text and discards all the surrounding clutter.
+
+### Agent 3 — Review Critic (Quality & Fact Auditor)
+The Review Critic acts as an un-biased peer reviewer. It evaluates the draft report against strict qualitative standards and outputs structured feedback:
+
+```text
+Score: 8.5/10
+
+Strengths:
+- Clear separation between Tokamak core containment and Stellarator magnet design.
+- Accurate citations of recent 2025 ignition benchmarks.
+
+Areas to Improve:
+- Provide more details on tritium breeding blanket material degradation.
+
+One line verdict:
+An exceptionally detailed and well-supported technical summary ready for publication.
+```
+
+---
+
+## 3. Vector Storage & RAG Ingestion Pipeline
+
+Once the final report is audited, the pipeline automatically ingests it into a RAG (Retrieval-Augmented Generation) knowledge base for future querying.
+
+```python
+def ingest_report_to_vectorstore(topic: str, report_text: str):
+    # 1. Text Chunking
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200,
+        separators=["
+
+", "
+", " ", ""]
+    )
+    docs = text_splitter.create_documents(
+        texts=[report_text],
+        metadatas=[{"topic": topic, "timestamp": datetime.utcnow().isoformat()}]
+    )
+    
+    # 2. Embedding Generation & Vector Store Indexing
+    embeddings = MistralAIEmbeddings(model="mistral-embed")
+    
+    if os.getenv("PINECONE_API_KEY"):
+        # Index to Pinecone Cloud
+        vectorstore = PineconeVectorStore.from_documents(
+            documents=docs,
+            embedding=embeddings,
+            index_name=os.getenv("PINECONE_INDEX_NAME")
+        )
+    else:
+        # Fallback to local ChromaDB
+        vectorstore = Chroma.from_documents(
+            documents=docs,
+            embedding=embeddings,
+            persist_directory="./data/chroma_db"
+        )
+    return vectorstore
+```
+
+---
+
+## 4. Real-Time Telemetry & SSE Streaming
+
+Rather than making the user wait 45 seconds staring at a blank screen, the FastAPI backend (`server.py`) streams live execution logs via **Server-Sent Events (SSE)** over `/api/research`:
+
+```python
+@app.get("/api/research")
+async def stream_research(topic: str):
+    async def event_generator():
+        # Pipeline generator yields state events
+        for event in run_research_pipeline_generator(topic):
+            event_type = event["type"] # e.g. "search_start", "scraped_data", "report_draft"
+            data_payload = json.dumps(event["data"])
+            yield f"event: {event_type}
+data: {data_payload}
+
+"
+            
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+```
+
+---
+
+## 5. Real Engineering Bugs & Hard Lessons
+
+### Bug 1 — Context Window Bloat from Un-sanitized Heavy SPAs
+- **Symptom**: The Writer Agent crashed with `InvalidRequestError: maximum context length exceeded`.
+- **Root Cause**: Scraped single-page application (SPA) websites returned 150KB of inline JSON-LD state scripts embedded inside `<script id="__NEXT_DATA__">` tags. Plain regex string stripping missed nested tags.
+- **Fix**: Added explicit `soup(["script", "style", "nav", "footer"]).decompose()` calls before calling `get_text()`, and hard-capped clean text output to 3,000 characters.
+
+### Bug 2 — SQLite Version Mismatch with ChromaDB on Linux Cloud
+- **Symptom**: Local execution worked on macOS, but Render cloud deployment failed with `RuntimeError: Your system has SQLite 3.31.1, but Chroma requires SQLite >= 3.35.0`.
+- **Root Cause**: Render Linux base image shipped with an older system SQLite library.
+- **Fix**: Injected `pysqlite3` binary override at the top of `rag_store.py`:
+  ```python
+  __import__('pysqlite3')
+  import sys
+  sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+  ```
+
+### Bug 3 — Critic Infinite Refinement Loop
+- **Symptom**: The agent pipeline got stuck in an infinite loop where the Critic repeatedly requested minor stylistic updates.
+- **Fix**: Implemented a hard limit of `max_iterations = 1` for the refinement pass, ensuring deterministic execution times.
+
+---
+
+## 6. Summary of Bugs & Resolutions
+
+| Problem | Root Cause | Engineering Solution |
+| :--- | :--- | :--- |
+| **Context length exceeded** | Heavy inline `<script>` tags in DOM | Decomposition of script nodes + 3k char truncation |
+| **ChromaDB SQLite error** | Linux system SQLite version too old | Injected `pysqlite3` override into `sys.modules` |
+| **Infinite agent loop** | Critic repeatedly requesting minor edits | Added max iteration cap and terminal score threshold |
+| **Pinecone connection timeout** | Cloud API socket latency on startup | Implemented local ChromaDB automatic fallback |
+
+---
+
+## 7. Key Takeaways & Resources
+
+- **DOM Sanitization is non-negotiable for AI scraping**: Never feed raw web markup into an LLM without decomposing scripts and styles first.
+- **SSE Streaming improves UX dramatically**: Streaming intermediate agent states keeps users engaged during long multi-step workflows.
+- **Hybrid Cloud/Local RAG fallbacks ensure uptime**: Designing local ChromaDB fallback ensures vector search works even when cloud vector services are unreachable.
+
+- **GitHub Repository**: [github.com/shlokbam/Multi_Agent_AI_Research_System](https://github.com/shlokbam/Multi_Agent_AI_Research_System)
+- **Tavily API Specs**: [tavily.com](https://tavily.com)
+""",
+                content_type="BUILD",
+                category="AI / ML",
+                status="PUBLISHED",
+                reading_time="22 min read",
+                featured=True,
+                cover_image="https://images.unsplash.com/photo-1677442136019-21780efad99a?q=80&w=1000&auto=format&fit=crop",
+                author="Shlok Bam",
+                project_slug=None,
+                github_repo="shlokbam/Multi_Agent_AI_Research_System",
+                published_at="2026-05-20"
+            )
+            for t_name in ["AI", "LangChain", "Mistral", "RAG", "Python"]:
+                tag = db.query(Tag).filter(Tag.name == t_name).first()
+                if not tag:
+                    tag = Tag(name=t_name, slug=t_name.lower().replace(" ", "-"))
+                    db.add(tag)
+                post_6.tags.append(tag)
+            db.add(post_6)
+            db.commit()
+
+        # Seed designing-a-real-time-enterprise-inventory-system-with-fifo-stock-reduction-automated-pdf-invoicing-and-telegram-webhooks
+        existing_7 = db.query(Post).filter(Post.slug == "designing-a-real-time-enterprise-inventory-system-with-fifo-stock-reduction-automated-pdf-invoicing-and-telegram-webhooks").first()
+        if not existing_7:
+            post_7 = Post(
+                title="Designing a Real-Time Enterprise Inventory System with FIFO Stock Reduction, Automated PDF Invoicing, and Telegram Webhooks",
+                slug="designing-a-real-time-enterprise-inventory-system-with-fifo-stock-reduction-automated-pdf-invoicing-and-telegram-webhooks",
+                excerpt="An architectural deep dive into building an enterprise inventory system featuring FIFO batch allocation, concurrency-safe PostgreSQL transactions, ReportLab PDF generation, and instant customer Telegram alerts.",
+                content="""![Inventory System Hero Banner](hero-banner)
+
+# Before We Start — The Problem with Traditional Inventory Software
+
+Managing inventory for small and medium retail businesses is deceptively complex. Most existing software solutions either fall into two extremes:
+1. **Overly bloated ERP systems**: Costing thousands of dollars with complex interfaces that require weeks of staff training.
+2. **Fragile Excel spreadsheets**: Prone to accidental overwrites, missing real-time stock deductions, zero concurrency control, and zero automated customer billing.
+
+The biggest operational headaches stem from three real-world challenges:
+- **Managing Batch Expiry & Stock Deduction**: Products arrive in different shipment batches with different cost prices and expiration dates. Deducting stock manually leads to expired goods sitting on shelves.
+- **Customer Ledger & Pending Debt ("Udhari")**: Tracking partial payments and outstanding balances across regular customers without payment disputes.
+- **Instant Receipts**: Generating professional PDF invoices on the fly and sending them immediately to customer mobile devices.
+
+To solve this, I designed and built the **Inventory Management System (IMS)** — a full-stack platform built with **FastAPI**, **SQLAlchemy**, **PostgreSQL (Neon.tech)**, **React (Vite + TailwindCSS)**, **ReportLab**, and **Telegram Bot API**.
+
+This post dives deep into the architecture, FIFO stock reduction algorithm, transactional concurrency locks, PDF generation, and automated Telegram webhooks.
+
+---
+
+## 1. System Architecture & Entity Relationships
+
+The core architecture follows a decoupled model:
+
+```text
+┌────────────────────────────────────────────────────────────────────────┐
+│               React + Vite Frontend (TailwindCSS + Recharts)           │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    │ HTTP REST API (JWT Auth)
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                   FastAPI Backend (Python 3.12)                        │
+│  ├── /routers/products.py     ├── /services/stock_service.py           │
+│  ├── /routers/transactions.py ├── /services/telegram_service.py        │
+│  └── /routers/invoices.py     └── /auth.py (JWT & Passlib)            │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+               ┌────────────────────┴────────────────────┐
+               ▼                                         ▼
+┌──────────────────────────────┐        ┌────────────────────────────────┐
+│  PostgreSQL (Neon Cloud)     │        │  Telegram Bot API (@BotFather) │
+│  Products, Batches, Customers│        │  Dispatches PDFs & Notifications│
+└──────────────────────────────┘        └────────────────────────────────┘
+```
+
+### Database Entity-Relationship (ER) Model
+
+The database schema is designed to enforce relational integrity and auditability:
+
+```text
+  ┌──────────────┐          ┌──────────────┐          ┌──────────────┐
+  │  Categories  │1        N│   Products   │1        N│   Batches    │
+  │──────────────│──────────│──────────────│──────────│──────────────│
+  │ id (PK)      │          │ id (PK)      │          │ id (PK)      │
+  │ name         │          │ category_id  │          │ product_id   │
+  └──────────────┘          │ min_stock    │          │ qty_remaining│
+                            └──────────────┘          │ expiry_date  │
+                                   │1                 └──────────────┘
+                                   │
+                                   │N
+                            ┌──────────────┐
+                            │ Transaction  │
+                            │    Items     │
+                            └──────────────┘
+```
+
+---
+
+## 2. The FIFO (First-In-First-Out) Stock Reduction Engine
+
+When a customer buys 50 units of a product, those 50 units shouldn't be deducted arbitrarily. To prevent inventory spoilage, the system must deduct stock from the **oldest available batch** first (**FIFO**). If the oldest batch only has 20 units, the system must exhaust those 20 units, close the batch, and deduct the remaining 30 units from the next oldest batch.
+
+Here is the implementation in `app/services/stock_service.py`:
+
+```python
+def deduct_stock_fifo(db: Session, product_id: int, quantity_to_deduct: int) -> list[dict]:
+    # 1. Query active batches ordered by oldest creation / expiration date
+    # Lock rows for update to prevent concurrent race conditions
+    batches = (
+        db.query(Batch)
+        .filter(Batch.product_id == product_id, Batch.quantity_remaining > 0)
+        .order_by(Batch.created_at.asc())
+        .with_for_update()
+        .all()
+    )
+    
+    total_available = sum(b.quantity_remaining for b in batches)
+    if total_available < quantity_to_deduct:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Insufficient stock! Requested: {quantity_to_deduct}, Available: {total_available}"
+        )
+        
+    deductions = []
+    remaining_needed = quantity_to_deduct
+    
+    for batch in batches:
+        if remaining_needed <= 0:
+            break
+            
+        take_amount = min(batch.quantity_remaining, remaining_needed)
+        batch.quantity_remaining -= take_amount
+        remaining_needed -= take_amount
+        
+        deductions.append({
+            "batch_id": batch.id,
+            "quantity_deducted": take_amount,
+            "cost_price": batch.cost_price
+        })
+        
+    db.flush() # Persist state within current transaction block
+    return deductions
+```
+
+> 💡 **Simple Version:** Imagine a grocery store shelf with milk cartons. The FIFO engine forces the cashier to sell milk with the earliest expiration date first. If a customer buys 3 cartons and only 1 carton remains in the front row, the engine takes 1 carton from the front and 2 cartons from the new shipment behind it.
+
+---
+
+## 3. Customer Ledger & Pending Debt ("Udhari") Tracking
+
+In real-world retail, regular business customers rarely pay 100% upfront. They make partial payments, accumulating pending balances.
+
+The system maintains a real-time ledger on the `Customer` model:
+- `total_purchased`: Cumulative financial value of all orders.
+- `total_paid`: Total payments collected.
+- `pending_balance`: `total_purchased - total_paid`.
+
+When a new transaction occurs:
+```python
+customer = db.query(Customer).filter(Customer.id == customer_id).with_for_update().first()
+customer.total_purchased += grand_total
+customer.total_paid += amount_paid
+customer.pending_balance = customer.total_purchased - customer.total_paid
+db.commit()
+```
+
+If `pending_balance > 0`, the customer's profile is tagged with a warning badge on the React UI, displaying their pending balance and past payment history.
+
+---
+
+## 4. Automated PDF Invoices & Telegram Webhook Alerts
+
+### 1. PDF Invoice Generation (`invoices.py`)
+Using **ReportLab**, the system generates clean, formatted PDF invoices directly in memory (`io.BytesIO`) without writing temporary files to disk:
+
+```python
+def generate_invoice_pdf(transaction: Transaction) -> io.BytesIO:
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, leftMargin=36, rightMargin=36)
+    story = []
+    
+    # Invoice Header & Customer Info Table
+    story.append(Paragraph(f"INVOICE #{transaction.id}", title_style))
+    story.append(Spacer(1, 12))
+    
+    # Items Table (Product, Quantity, Unit Price, Total)
+    table_data = [["Product", "Qty", "Price", "Total"]]
+    for item in transaction.items:
+        table_data.append([
+            item.product.name,
+            str(item.quantity),
+            f"${item.unit_price:.2f}",
+            f"${item.subtotal:.2f}"
+        ])
+        
+    story.append(Table(table_data, style=table_grid_style))
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+```
+
+### 2. Telegram Bot Integration (`telegram_service.py`)
+When a sale completes, FastAPI triggers a background task that sends a text summary and PDF attachment directly to the customer's or manager's Telegram chat:
+
+```python
+async def send_telegram_invoice(chat_id: str, pdf_bytes: io.BytesIO, caption: str):
+    url = f"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/sendDocument"
+    files = {"document": ("invoice.pdf", pdf_bytes, "application/pdf")}
+    data = {"chat_id": chat_id, "caption": caption}
+    
+    async with httpx.AsyncClient() as client:
+        await client.post(url, data=data, files=files)
+```
+
+---
+
+## 5. Real Engineering Bugs & Hard Lessons
+
+### Bug 1 — Concurrent Race Condition on Low Stock
+- **Symptom**: Two cashiers checking out at the exact same second for a product with 10 remaining units both succeeded. Stock dropped to `-10`.
+- **Root Cause**: Default `db.query(Batch)` execution did not lock database rows. Both API requests read `quantity_remaining = 10` simultaneously before either commit finished.
+- **Fix**: Added `.with_for_update()` to SELECT queries in `stock_service.py`. This forces PostgreSQL to acquire a pessimistic row lock until the transaction commits.
+
+### Bug 2 — Floating Point Currency Rounding Errors
+- **Symptom**: An invoice subtotal calculated as `$19.990000000000002` instead of `$19.99`.
+- **Root Cause**: Standard Python IEEE 754 floating-point arithmetic imprecision.
+- **Fix**: Standardized all currency models to `Decimal` in Python and `NUMERIC(10, 2)` in PostgreSQL schema, rounding explicit totals with `ROUND(val, 2)`.
+
+### Bug 3 — ReportLab Text Table Overflow
+- **Symptom**: Long product titles (e.g. *"Heavy Duty Industrial Galvanized Steel Pipe 20mm"*) overflowed table columns and got truncated outside the PDF page boundary.
+- **Root Cause**: Plain string cells inside ReportLab `Table` do not auto-wrap.
+- **Fix**: Wrapped string values inside `Paragraph(text, cell_style)` flowable objects with explicit column width constraints.
+
+---
+
+## 6. Summary of Bugs & Resolutions
+
+| Problem | Root Cause | Engineering Solution |
+| :--- | :--- | :--- |
+| **Negative inventory stock** | Unlocked concurrent DB queries | Applied `.with_for_update()` pessimistic row locks |
+| **Currency `$19.99000002` error** | Python float arithmetic | Converted database & schemas to `Decimal` / `NUMERIC(10,2)` |
+| **PDF table text truncation** | ReportLab Table plain text cells | Wrapped text strings inside `Paragraph` flowables |
+| **Telegram API timeout** | Synchronous HTTP calls blocking main thread | Offloaded Telegram send routine to FastAPI `BackgroundTasks` |
+
+---
+
+## 7. Key Takeaways & Resources
+
+- **Pessimistic locking is essential for stock management**: Never rely on application-level checks alone for shared inventory quantities. Use database row locks (`FOR UPDATE`).
+- **Use exact decimal types for money**: Never store financial amounts as floating-point numbers.
+- **In-memory PDF generation saves disk I/O**: Generating PDFs using `io.BytesIO` avoids temporary file cleanup and disk write bottlenecks.
+
+- **GitHub Repository**: [github.com/shlokbam/Inventory_Management_System](https://github.com/shlokbam/Inventory_Management_System)
+- **FastAPI Documentation**: [fastapi.tiangolo.com](https://fastapi.tiangolo.com)
+- **ReportLab User Guide**: [reportlab.com](https://www.reportlab.com)
+""",
+                content_type="BUILD",
+                category="Software Architecture",
+                status="PUBLISHED",
+                reading_time="20 min read",
+                featured=True,
+                cover_image="https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?q=80&w=1000&auto=format&fit=crop",
+                author="Shlok Bam",
+                project_slug=None,
+                github_repo="shlokbam/Inventory_Management_System",
+                published_at="2026-07-05"
+            )
+            for t_name in ["FastAPI", "PostgreSQL", "React", "Python", "Docker"]:
+                tag = db.query(Tag).filter(Tag.name == t_name).first()
+                if not tag:
+                    tag = Tag(name=t_name, slug=t_name.lower().replace(" ", "-"))
+                    db.add(tag)
+                post_7.tags.append(tag)
+            db.add(post_7)
+            db.commit()
+
         # Seed sample posts if empty or missing devops post
         devops_slug = "i-built-a-full-devops-ci-cd-pipeline-from-scratch-here-s-everything-that-went-wrong"
         existing = db.query(Post).filter(Post.slug == devops_slug).first()
