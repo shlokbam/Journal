@@ -1,0 +1,35 @@
+# Dependencies & Build Outputs
+node_modules/
+dist/
+build/
+.output/
+
+# Python & Environment
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env
+.env.local
+.env.*.local
+
+# Databases & Local SQLite
+*.db
+*.sqlite
+*.sqlite3
+journal.db
+backend/journal.db
+
+# OS & IDE junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
+
+# Temporary document exports
+*.docx
+*.pdf
+extracted_lms_blog.txt
